@@ -1,0 +1,46 @@
+# Source files (we ship compiled dist/)
+src/
+tsconfig.json
+.eslintrc.js
+jest.config.js
+playwright.config.ts
+
+# Development files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Test files and results
+tests/
+test-results/
+playwright-report/
+coverage/
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Temporary files
+.tmp/
+.cache/
+.nyc_output/
+.eslintcache
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Git
+.git/
+.gitignore
+
+# Dependencies
+node_modules/

@@ -1,0 +1,64 @@
+{
+  "name": "playwright-ai-self-healing",
+  "version": "1.0.0",
+  "description": "AI-powered self-healing locator library for Playwright tests with advanced similarity algorithms",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "test": "jest",
+    "lint": "eslint src/**/*.ts",
+    "prepare": "npm run build"
+  },
+  "keywords": [
+    "playwright",
+    "automation",
+    "testing",
+    "ai",
+    "self-healing",
+    "selectors",
+    "locators",
+    "typescript",
+    "similarity",
+    "algorithms",
+    "dom",
+    "elements",
+    "robust-testing",
+    "e2e",
+    "ui-testing"
+  ],
+  "author": "stokrattt",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/stokrattt/playwright-ai-self-healing.git"
+  },
+  "bugs": {
+    "url": "https://github.com/stokrattt/playwright-ai-self-healing/issues"
+  },
+  "homepage": "https://github.com/stokrattt/playwright-ai-self-healing#readme",
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE",
+    "INTEGRATION_GUIDE.md",
+    "CHANGELOG.md"
+  ],
+  "engines": {
+    "node": ">=16.0.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.55.0",
+    "@types/jest": "^29.5.5",
+    "@types/node": "^20.6.3",
+    "@typescript-eslint/eslint-plugin": "^6.7.2",
+    "@typescript-eslint/parser": "^6.7.2",
+    "eslint": "^8.49.0",
+    "jest": "^29.7.0",
+    "ts-jest": "^29.1.1",
+    "typescript": "^5.2.2"
+  },
+  "peerDependencies": {
+    "playwright": ">=1.30.0"
+  }
+}
