@@ -50,3 +50,5 @@ export class BasePage {
 ```
 
 For more examples, see the main README.md and INTEGRATION_GUIDE.md files.
+
+The repository also includes [runtime-smoke.js](./runtime-smoke.js), a real-browser smoke example that verifies healed `click`, `fill`/`type`, and visibility assertions.

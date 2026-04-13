@@ -1,6 +1,6 @@
 {
   "name": "playwright-ai-self-healing",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "AI-powered self-healing locator library for Playwright tests with advanced similarity algorithms",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

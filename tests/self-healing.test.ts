@@ -1,5 +1,6 @@
 import { PlaywrightAISelfHealing } from '../src';
 import { PlaywrightLocator, PlaywrightPage, SerializedElement } from '../src/types';
+import { MemorySelectorStore } from '../src/selector-store';
 
 type MockLocator = PlaywrightLocator & {
   waitFor: jest.Mock<Promise<void>, [{ timeout?: number; state?: 'attached' | 'detached' | 'visible' | 'hidden' }?]>;
@@ -187,5 +188,77 @@ describe('PlaywrightAISelfHealing', () => {
     expect(firstResult).toBe(healedButton);
     expect(secondResult).toBe(healedInput);
     expect(page.locator).toHaveBeenCalledWith('#email-field-v2');
+  });
+
+  it('reuses a stored selector override before re-running healing', async () => {
+    const originalLocator = createLocator(async () => {
+      throw new Error('not found');
+    });
+    const storedLocator = createLocator();
+    const selectorStore = new MemorySelectorStore();
+
+    selectorStore.set({
+      originalSelector: '[data-testid="save-button"]',
+      healedSelector: '#save-button-renamed',
+      source: 'healed',
+      updatedAt: new Date().toISOString(),
+    });
+
+    const page: PlaywrightPage<MockLocator> = {
+      locator: jest.fn((selector: string) => selector === '#save-button-renamed' ? storedLocator : originalLocator),
+      evaluate: jest.fn(async () => {
+        throw new Error('healing should not run when stored selector works');
+      }) as unknown as PlaywrightPage<MockLocator>['evaluate'],
+    };
+
+    const ai = new PlaywrightAISelfHealing({
+      selectorStore,
+    });
+
+    const result = await ai.findElementUniversal(page, '[data-testid="save-button"]');
+
+    expect(result).toBe(storedLocator);
+    expect(page.locator).toHaveBeenNthCalledWith(1, '#save-button-renamed');
+  });
+
+  it('persists healed selectors to the configured selector store', async () => {
+    const originalLocator = createLocator(async () => {
+      throw new Error('not found');
+    });
+    const healedLocator = createLocator();
+    const selectorStore = new MemorySelectorStore();
+
+    const elements: SerializedElement[] = [
+      {
+        tagName: 'button',
+        id: 'save-button-renamed',
+        className: 'primary',
+        textContent: 'Save',
+        placeholder: '',
+        name: '',
+        type: 'button',
+        role: 'button',
+        ariaLabel: '',
+        title: '',
+        value: '',
+        href: '',
+        src: '',
+        alt: '',
+      },
+    ];
+
+    const page: PlaywrightPage<MockLocator> = {
+      locator: jest.fn((selector: string) => selector === '#save-button-renamed' ? healedLocator : originalLocator),
+      evaluate: jest.fn(async () => elements) as unknown as PlaywrightPage<MockLocator>['evaluate'],
+    };
+
+    const ai = new PlaywrightAISelfHealing({
+      minSimilarityThreshold: 0.2,
+      selectorStore,
+    });
+
+    await ai.findElementUniversal(page, '[data-testid="save-button"]');
+
+    expect(selectorStore.get('[data-testid="save-button"]')).toBe('#save-button-renamed');
   });
 });

@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.1] - 2026-04-13
+
+### Added
+- Project-friendly selector persistence with JSON-backed selector stores
+- `createProjectSelfHealing()` helper with default project store path support
+- Runtime smoke example covering healed click, fill/type, and visibility flows
+- Regression tests for selector persistence, CI/project defaults, and stale DOM cache handling
+
+### Changed
+- Healed locators now preserve the concrete Playwright locator type for compatibility with `expect(locator).toBeVisible()`
+- Selector lookup can reuse previously learned selectors before re-running similarity analysis
+- Documentation now explains how to persist learned selectors locally and on CI
+
+### Fixed
+- Respected configured timeouts instead of using a hardcoded locator wait
+- Refreshed cached DOM snapshots after page content changes on the same page instance
+- Corrected README and integration examples to reflect the actual public API
+
 ## [1.0.0] - 2025-09-16
 
 ### Added

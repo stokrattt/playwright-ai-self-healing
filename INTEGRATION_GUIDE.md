@@ -180,6 +180,23 @@ export class BasePage {
 }
 ```
 
+### Persist healed selectors in the project
+
+Recommended approach: save learned selectors to a JSON file in the test project, review that file in git, and commit it when the override looks correct.
+
+```typescript
+import { createProjectSelfHealing } from 'playwright-ai-self-healing';
+
+export class BasePage {
+  protected page: Page;
+  protected ai = createProjectSelfHealing();
+}
+```
+
+This gives you a reviewable artifact that can be pushed to the project without auto-rewriting page object source files. The default path is `playwright/.healed-selectors.json`.
+
+CI note: `createProjectSelfHealing()` also writes learned selectors on CI by default. If you want those updates to survive future CI runs, persist `playwright/.healed-selectors.json` through git, cache, or artifacts. If your pipeline must avoid writes, set `PLAYWRIGHT_AI_SELF_HEALING_STORE_MODE=read`.
+
 ## 📊 Monitoring and Logging
 
 ### Adding detailed logging:

@@ -286,6 +286,128 @@ const selfHealing = createSelfHealing({
 | `maxElementsToAnalyze` | number | 50 | Maximum number of elements to analyze |
 | `findTimeout` | number | 5000 | Timeout for finding elements in milliseconds |
 | `debug` | boolean | false | Enable debug logging (disable in production for security) |
+| `selectorStore` | `SelectorStore` | `undefined` | Optional store for reusing and persisting working selectors |
+| `useStoredSelectorsFirst` | boolean | `true` | Try a saved selector override before retrying the original selector |
+
+### Persist Learned Selectors
+
+The safest way to "push back" a healed selector into your project is to save it in a project-owned JSON file and commit that file. This keeps changes reviewable and avoids auto-editing your page objects.
+
+For most teams, the easiest setup is `createProjectSelfHealing()`. It uses one shared file path and sensible defaults:
+
+- local runs: read-write mode
+- CI runs: read-write mode too
+- default file path: `playwright/.healed-selectors.json`
+
+```typescript
+import {
+  createProjectSelfHealing,
+} from 'playwright-ai-self-healing';
+
+const ai = createProjectSelfHealing();
+
+const loginButton = await ai.findElementUniversal(page, '[data-testid="login-button"]');
+await loginButton?.click();
+```
+
+If you want to wire this once for the whole framework, put it in your shared `BasePage` or fixture:
+
+```typescript
+import { Page } from '@playwright/test';
+import { createProjectSelfHealing } from 'playwright-ai-self-healing';
+
+export class BasePage {
+  protected page: Page;
+  protected ai = createProjectSelfHealing();
+
+  constructor(page: Page) {
+    this.page = page;
+  }
+}
+```
+
+On the first successful local healing, the library writes an override like:
+
+```json
+{
+  "version": 1,
+  "selectors": {
+    "[data-testid=\"login-button\"]": {
+      "originalSelector": "[data-testid=\"login-button\"]",
+      "healedSelector": "#login-button-v2",
+      "source": "healed",
+      "updatedAt": "2026-04-13T00:00:00.000Z"
+    }
+  }
+}
+```
+
+On later runs, the saved selector is tried before running the similarity scan again.
+
+If you need custom behavior, you can override the path or mode:
+
+```typescript
+import { createProjectSelfHealing } from 'playwright-ai-self-healing';
+
+const ai = createProjectSelfHealing(
+  { minSimilarityThreshold: 0.2 },
+  {
+    selectorStorePath: './qa/healed-selectors.json',
+    selectorStoreMode: 'read-write',
+  }
+);
+```
+
+Supported modes:
+
+- `'read-write'`: read existing selectors and save new healed selectors
+- `'read'`: read existing selectors but do not write updates
+- `'off'`: disable the selector store completely
+
+Environment variables:
+
+- `PLAYWRIGHT_AI_SELF_HEALING_STORE_PATH`
+- `PLAYWRIGHT_AI_SELF_HEALING_STORE_MODE`
+
+### CI Behavior
+
+By default, `createProjectSelfHealing()` also writes learned selectors on CI.
+
+That means:
+
+1. CI reads `playwright/.healed-selectors.json` from your repository.
+2. CI uses saved selectors if the file is present.
+3. CI can update that file during the pipeline when healing finds a better locator.
+
+So where does the file come from on CI?
+
+- Usually from the repository itself, if you already committed `playwright/.healed-selectors.json`.
+- Or from a previous CI step that restores it from cache or artifact storage.
+
+Important: a CI machine is usually ephemeral. The library can update the file inside the job workspace, but if you want future CI runs to benefit from those changes, your pipeline must persist that file somehow.
+
+You have two practical options:
+
+1. Commit the updated `playwright/.healed-selectors.json` back to the branch or open a PR with it.
+2. Restore/save the file through CI cache or artifacts between runs.
+
+If the file does not exist on CI yet, tests still run. You simply will not get reuse of previously healed selectors until the file is restored or committed.
+
+Example strategy for CI-first teams:
+
+1. Check out the repository.
+2. Restore `playwright/.healed-selectors.json` from cache or keep the committed copy.
+3. Run tests with `createProjectSelfHealing()`.
+4. After the run, either:
+   - upload the file as an artifact for inspection
+   - save it back to cache
+   - or commit it back to the branch
+
+If your pipeline must not modify workspace files, force read-only mode:
+
+```bash
+PLAYWRIGHT_AI_SELF_HEALING_STORE_MODE=read
+```
 
 ### Self-Healing Methods
 

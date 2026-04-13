@@ -1,7 +1,15 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.PlaywrightAISelfHealing = exports.DEFAULT_CONFIG = void 0;
+exports.PlaywrightAISelfHealing = exports.DEFAULT_CONFIG = exports.SELECTOR_STORE_MODE_ENV = exports.SELECTOR_STORE_PATH_ENV = exports.DEFAULT_SELECTOR_STORE_PATH = exports.ReadOnlySelectorStore = exports.JsonFileSelectorStore = exports.MemorySelectorStore = void 0;
 exports.createSelfHealing = createSelfHealing;
+exports.createProjectSelfHealing = createProjectSelfHealing;
+const selector_store_1 = require("./selector-store");
+Object.defineProperty(exports, "MemorySelectorStore", { enumerable: true, get: function () { return selector_store_1.MemorySelectorStore; } });
+Object.defineProperty(exports, "JsonFileSelectorStore", { enumerable: true, get: function () { return selector_store_1.JsonFileSelectorStore; } });
+Object.defineProperty(exports, "ReadOnlySelectorStore", { enumerable: true, get: function () { return selector_store_1.ReadOnlySelectorStore; } });
+exports.DEFAULT_SELECTOR_STORE_PATH = 'playwright/.healed-selectors.json';
+exports.SELECTOR_STORE_PATH_ENV = 'PLAYWRIGHT_AI_SELF_HEALING_STORE_PATH';
+exports.SELECTOR_STORE_MODE_ENV = 'PLAYWRIGHT_AI_SELF_HEALING_STORE_MODE';
 /**
  * Default configuration optimized for performance
  */
@@ -14,6 +22,8 @@ exports.DEFAULT_CONFIG = {
     maxElementsToAnalyze: 50,
     findTimeout: 5000,
     debug: false, // Secure default: no debug logging
+    selectorStore: undefined,
+    useStoredSelectorsFirst: true,
 };
 /**
  * AI Self-Healing Locator Library
@@ -71,6 +81,54 @@ class PlaywrightAISelfHealing {
         }
     }
     /**
+     * Try resolving a selector into a usable locator
+     */
+    async tryLocator(page, selector, timeout) {
+        try {
+            const locator = page.locator(selector);
+            await locator.waitFor({ timeout });
+            return locator;
+        }
+        catch {
+            return null;
+        }
+    }
+    /**
+     * Try a stored selector override and then fall back to the original selector
+     */
+    async resolveStoredOrOriginal(page, originalSelector, timeout) {
+        const storedSelector = await this.config.selectorStore?.get(originalSelector) ?? null;
+        if (this.config.useStoredSelectorsFirst && storedSelector && storedSelector !== originalSelector) {
+            const storedLocator = await this.tryLocator(page, storedSelector, timeout);
+            if (storedLocator) {
+                this.secureLog(`Using stored selector override: "${originalSelector}" -> "${storedSelector}"`);
+                return storedLocator;
+            }
+            this.secureLog(`Stored selector no longer works: "${storedSelector}"`);
+        }
+        const originalLocator = await this.tryLocator(page, originalSelector, timeout);
+        if (originalLocator) {
+            await this.persistSelectorResolution(originalSelector, originalSelector, 'original');
+            return originalLocator;
+        }
+        return null;
+    }
+    /**
+     * Persist a selector resolution when a store is configured
+     */
+    async persistSelectorResolution(originalSelector, healedSelector, source) {
+        if (!this.config.selectorStore) {
+            return;
+        }
+        const record = {
+            originalSelector,
+            healedSelector,
+            source,
+            updatedAt: new Date().toISOString(),
+        };
+        await this.config.selectorStore.set(record);
+    }
+    /**
      * Universal self-healing method with comprehensive similarity analysis
      * Combines multiple algorithms for best accuracy
      */
@@ -80,13 +138,9 @@ class PlaywrightAISelfHealing {
         if (!this.isValidSelector(originalSelector)) {
             throw new Error('Invalid selector provided');
         }
-        try {
-            const locator = page.locator(originalSelector);
-            await locator.waitFor({ timeout });
-            return locator;
-        }
-        catch {
-            // Original selector failed, attempt self-healing
+        const existingLocator = await this.resolveStoredOrOriginal(page, originalSelector, timeout);
+        if (existingLocator) {
+            return existingLocator;
         }
         const allElements = await this.getAllPageElements(page, true);
         this.secureLog(`Found ${allElements.length} elements on page for analysis`);
@@ -108,8 +162,13 @@ class PlaywrightAISelfHealing {
         this.secureLog(`Best match score: ${bestScore.toFixed(3)}, threshold: ${this.config.minSimilarityThreshold}`);
         if (bestMatch) {
             const healedSelector = await this.generateOptimalSelector(page, bestMatch);
+            const locator = await this.tryLocator(page, healedSelector, timeout);
+            if (!locator) {
+                return null;
+            }
+            await this.persistSelectorResolution(originalSelector, healedSelector, 'healed');
             this.secureLog(`Self-healing successful: "${originalSelector}" -> "${healedSelector}" (score: ${bestScore.toFixed(3)})`);
-            return page.locator(healedSelector);
+            return locator;
         }
         return null;
     }
@@ -123,13 +182,9 @@ class PlaywrightAISelfHealing {
         if (!this.isValidSelector(originalSelector)) {
             throw new Error('Invalid selector provided');
         }
-        try {
-            const locator = page.locator(originalSelector);
-            await locator.waitFor({ timeout });
-            return locator;
-        }
-        catch {
-            // Original selector failed, attempt self-healing
+        const existingLocator = await this.resolveStoredOrOriginal(page, originalSelector, timeout);
+        if (existingLocator) {
+            return existingLocator;
         }
         const allElements = await this.getAllPageElements(page, true);
         for (const element of allElements.slice(0, this.config.maxElementsToAnalyze)) {
@@ -137,8 +192,13 @@ class PlaywrightAISelfHealing {
             const similarity = this.calculateLevenshteinSimilarity(originalSelector, elementText);
             if (similarity >= this.config.minSimilarityThreshold) {
                 const healedSelector = await this.generateOptimalSelector(page, element);
+                const locator = await this.tryLocator(page, healedSelector, timeout);
+                if (!locator) {
+                    continue;
+                }
+                await this.persistSelectorResolution(originalSelector, healedSelector, 'healed');
                 this.secureLog(`Simple self-healing: "${originalSelector}" -> "${healedSelector}" (score: ${similarity.toFixed(3)})`);
-                return page.locator(healedSelector);
+                return locator;
             }
         }
         return null;
@@ -153,13 +213,9 @@ class PlaywrightAISelfHealing {
         if (!this.isValidSelector(originalSelector)) {
             throw new Error('Invalid selector provided');
         }
-        try {
-            const locator = page.locator(originalSelector);
-            await locator.waitFor({ timeout });
-            return locator;
-        }
-        catch {
-            // Original selector failed, attempt self-healing
+        const existingLocator = await this.resolveStoredOrOriginal(page, originalSelector, timeout);
+        if (existingLocator) {
+            return existingLocator;
         }
         const allElements = await this.getAllPageElements(page, true);
         const candidates = [];
@@ -175,8 +231,13 @@ class PlaywrightAISelfHealing {
             candidates.sort((a, b) => b.score - a.score);
             const bestCandidate = candidates[0];
             const healedSelector = await this.generateOptimalSelector(page, bestCandidate.element);
+            const locator = await this.tryLocator(page, healedSelector, timeout);
+            if (!locator) {
+                return null;
+            }
+            await this.persistSelectorResolution(originalSelector, healedSelector, 'healed');
             this.secureLog(`Complex self-healing: "${originalSelector}" -> "${healedSelector}" (score: ${bestCandidate.score.toFixed(3)})`);
-            return page.locator(healedSelector);
+            return locator;
         }
         return null;
     }
@@ -190,13 +251,9 @@ class PlaywrightAISelfHealing {
         if (!this.isValidSelector(originalSelector)) {
             throw new Error('Invalid selector provided');
         }
-        try {
-            const locator = page.locator(originalSelector);
-            await locator.waitFor({ timeout });
-            return locator;
-        }
-        catch {
-            // Original selector failed, attempt self-healing
+        const existingLocator = await this.resolveStoredOrOriginal(page, originalSelector, timeout);
+        if (existingLocator) {
+            return existingLocator;
         }
         const allElements = await this.getAllPageElements(page, true);
         const contextualElements = await this.getContextualElements(page, originalSelector);
@@ -213,8 +270,13 @@ class PlaywrightAISelfHealing {
         }
         if (bestMatch) {
             const healedSelector = await this.generateOptimalSelector(page, bestMatch);
+            const locator = await this.tryLocator(page, healedSelector, timeout);
+            if (!locator) {
+                return null;
+            }
+            await this.persistSelectorResolution(originalSelector, healedSelector, 'healed');
             this.secureLog(`Advanced self-healing: "${originalSelector}" -> "${healedSelector}" (score: ${bestScore.toFixed(3)})`);
-            return page.locator(healedSelector);
+            return locator;
         }
         return null;
     }
@@ -598,6 +660,31 @@ exports.PlaywrightAISelfHealing = PlaywrightAISelfHealing;
  */
 function createSelfHealing(config) {
     return new PlaywrightAISelfHealing(config);
+}
+/**
+ * Create a self-healing instance with project-friendly defaults.
+ * Project runs default to read-write persistence in `playwright/.healed-selectors.json`.
+ * CI can use the same file, as long as the pipeline restores/saves it between runs.
+ */
+function createProjectSelfHealing(config = {}, options = {}) {
+    const env = options.env ?? (typeof process !== 'undefined' ? process.env : {});
+    const selectorStorePath = options.selectorStorePath
+        ?? env[exports.SELECTOR_STORE_PATH_ENV]
+        ?? exports.DEFAULT_SELECTOR_STORE_PATH;
+    const selectorStoreMode = options.selectorStoreMode
+        ?? env[exports.SELECTOR_STORE_MODE_ENV]
+        ?? 'read-write';
+    let selectorStore;
+    if (selectorStoreMode === 'read') {
+        selectorStore = new selector_store_1.ReadOnlySelectorStore(new selector_store_1.JsonFileSelectorStore(selectorStorePath));
+    }
+    else if (selectorStoreMode === 'read-write') {
+        selectorStore = new selector_store_1.JsonFileSelectorStore(selectorStorePath);
+    }
+    return new PlaywrightAISelfHealing({
+        ...config,
+        selectorStore,
+    });
 }
 /**
  * Default export for convenience

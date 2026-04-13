@@ -1,5 +1,19 @@
 import { PlaywrightPage, PlaywrightLocator, SelfHealingOptions, ElementMatch, SerializedElement } from './types';
+import { HealedSelectorRecord, SelectorResolutionSource, SelectorStore, MemorySelectorStore, JsonFileSelectorStore, ReadOnlySelectorStore } from './selector-store';
 export { PlaywrightPage, PlaywrightLocator, SelfHealingOptions, ElementMatch, SerializedElement };
+export { HealedSelectorRecord, SelectorResolutionSource, SelectorStore, MemorySelectorStore, JsonFileSelectorStore, ReadOnlySelectorStore, };
+export type ProjectSelectorStoreMode = 'off' | 'read' | 'read-write';
+export interface ProjectSelfHealingOptions {
+    /** Path to the project-owned selector store JSON file */
+    selectorStorePath?: string;
+    /** Selector store behavior for the current environment */
+    selectorStoreMode?: ProjectSelectorStoreMode;
+    /** Environment bag used to auto-configure behavior */
+    env?: Record<string, string | undefined>;
+}
+export declare const DEFAULT_SELECTOR_STORE_PATH = "playwright/.healed-selectors.json";
+export declare const SELECTOR_STORE_PATH_ENV = "PLAYWRIGHT_AI_SELF_HEALING_STORE_PATH";
+export declare const SELECTOR_STORE_MODE_ENV = "PLAYWRIGHT_AI_SELF_HEALING_STORE_MODE";
 /**
  * Configuration for AI Self-Healing performance optimization
  */
@@ -20,6 +34,10 @@ export interface SelfHealingConfig {
     findTimeout: number;
     /** Enable debug logging (security consideration: disable in production) */
     debug: boolean;
+    /** Optional selector store used to reuse and persist healed selectors */
+    selectorStore?: SelectorStore;
+    /** Whether a stored selector should be tried before the original selector */
+    useStoredSelectorsFirst: boolean;
 }
 /**
  * Default configuration optimized for performance
@@ -46,6 +64,18 @@ export declare class PlaywrightAISelfHealing {
      * Secure logging function
      */
     private secureLog;
+    /**
+     * Try resolving a selector into a usable locator
+     */
+    private tryLocator;
+    /**
+     * Try a stored selector override and then fall back to the original selector
+     */
+    private resolveStoredOrOriginal;
+    /**
+     * Persist a selector resolution when a store is configured
+     */
+    private persistSelectorResolution;
     /**
      * Universal self-healing method with comprehensive similarity analysis
      * Combines multiple algorithms for best accuracy
@@ -120,6 +150,12 @@ export declare class PlaywrightAISelfHealing {
  * Create a new instance of PlaywrightAISelfHealing
  */
 export declare function createSelfHealing(config?: Partial<SelfHealingConfig>): PlaywrightAISelfHealing;
+/**
+ * Create a self-healing instance with project-friendly defaults.
+ * Project runs default to read-write persistence in `playwright/.healed-selectors.json`.
+ * CI can use the same file, as long as the pipeline restores/saves it between runs.
+ */
+export declare function createProjectSelfHealing(config?: Partial<SelfHealingConfig>, options?: ProjectSelfHealingOptions): PlaywrightAISelfHealing;
 /**
  * Default export for convenience
  */
