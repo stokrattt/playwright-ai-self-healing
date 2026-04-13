@@ -1,7 +1,7 @@
 import { PlaywrightPage, PlaywrightLocator, SelfHealingOptions, ElementMatch, SerializedElement } from './types';
-import { HealedSelectorRecord, SelectorResolutionSource, SelectorStore, MemorySelectorStore, JsonFileSelectorStore, ReadOnlySelectorStore } from './selector-store';
+import { HealedSelectorRecord, SelectorContext, SelectorResolutionSource, SelectorStore, MemorySelectorStore, JsonFileSelectorStore, ReadOnlySelectorStore } from './selector-store';
 export { PlaywrightPage, PlaywrightLocator, SelfHealingOptions, ElementMatch, SerializedElement };
-export { HealedSelectorRecord, SelectorResolutionSource, SelectorStore, MemorySelectorStore, JsonFileSelectorStore, ReadOnlySelectorStore, };
+export { HealedSelectorRecord, SelectorContext, SelectorResolutionSource, SelectorStore, MemorySelectorStore, JsonFileSelectorStore, ReadOnlySelectorStore, };
 export type ProjectSelectorStoreMode = 'off' | 'read' | 'read-write';
 export interface ProjectSelfHealingOptions {
     /** Path to the project-owned selector store JSON file */
@@ -38,6 +38,8 @@ export interface SelfHealingConfig {
     selectorStore?: SelectorStore;
     /** Whether a stored selector should be tried before the original selector */
     useStoredSelectorsFirst: boolean;
+    /** Optional metadata attached to persisted selector records */
+    selectorContext?: SelectorContext;
 }
 /**
  * Default configuration optimized for performance

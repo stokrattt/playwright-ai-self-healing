@@ -2,6 +2,7 @@
  * Type definitions for Playwright integration
  * These types will be satisfied by the actual Playwright library when used as a peer dependency
  */
+import type { SelectorContext } from './selector-store';
 export interface PlaywrightPage<TLocator extends PlaywrightLocator = PlaywrightLocator> {
     locator(selector: string): TLocator;
     evaluate<T>(fn: (...args: any[]) => T, ...args: any[]): Promise<T>;
@@ -43,6 +44,8 @@ export interface SelfHealingOptions {
     timeout?: number;
     /** Enable debug logging (security consideration: disable in production) */
     debug?: boolean;
+    /** Optional metadata that will be saved alongside learned selectors */
+    context?: SelectorContext;
 }
 /**
  * Element match result

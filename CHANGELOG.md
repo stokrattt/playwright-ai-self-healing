@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.2] - 2026-04-13
+
+### Added
+- Rich selector record metadata including `originalSelector`, `healedSelector`, `timesUsed`, `lastVerifiedAt`, `testFile`, `pageObject`, and `notes`
+- Per-call and per-instance selector context support for making learned selector files reviewable by humans
+
+### Changed
+- `createProjectSelfHealing()` now defaults to read-write persistence in every environment, including CI
+- Documentation now explains exactly where to integrate the library so selector files are written automatically
+- CI guidance now covers committing, caching, or artifacting the learned selector file between runs
+
+### Fixed
+- Selector records now preserve enough context to understand which old locator maps to which new working locator
+
 ## [1.0.1] - 2026-04-13
 
 ### Added

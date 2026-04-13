@@ -44,7 +44,8 @@ class MemorySelectorStore {
         return this.records.get(originalSelector)?.healedSelector ?? null;
     }
     set(record) {
-        this.records.set(record.originalSelector, record);
+        const previous = this.records.get(record.originalSelector);
+        this.records.set(record.originalSelector, mergeSelectorRecord(previous, record));
     }
 }
 exports.MemorySelectorStore = MemorySelectorStore;
@@ -58,7 +59,7 @@ class JsonFileSelectorStore {
     }
     async set(record) {
         const data = await this.readFile();
-        data.selectors[record.originalSelector] = record;
+        data.selectors[record.originalSelector] = mergeSelectorRecord(data.selectors[record.originalSelector], record);
         await fs_1.promises.mkdir(path.dirname(this.filePath), { recursive: true });
         await fs_1.promises.writeFile(this.filePath, `${JSON.stringify(data, null, 2)}\n`, 'utf8');
     }
@@ -96,4 +97,24 @@ class ReadOnlySelectorStore {
     }
 }
 exports.ReadOnlySelectorStore = ReadOnlySelectorStore;
+function mergeSelectorRecord(previous, next) {
+    const observedAt = next.lastVerifiedAt ?? next.updatedAt;
+    const changed = !previous ||
+        previous.healedSelector !== next.healedSelector ||
+        previous.source !== next.source ||
+        previous.testFile !== next.testFile ||
+        previous.pageObject !== next.pageObject ||
+        previous.notes !== next.notes;
+    return {
+        originalSelector: next.originalSelector,
+        healedSelector: next.healedSelector,
+        source: next.source,
+        updatedAt: changed ? observedAt : previous.updatedAt,
+        lastVerifiedAt: observedAt,
+        timesUsed: (previous?.timesUsed ?? 0) + 1,
+        testFile: next.testFile ?? previous?.testFile,
+        pageObject: next.pageObject ?? previous?.pageObject,
+        notes: next.notes ?? previous?.notes,
+    };
+}
 //# sourceMappingURL=selector-store.js.map

@@ -3,11 +3,22 @@ import * as path from 'path';
 
 export type SelectorResolutionSource = 'stored' | 'original' | 'healed';
 
+export interface SelectorContext {
+  testFile?: string;
+  pageObject?: string;
+  notes?: string;
+}
+
 export interface HealedSelectorRecord {
   originalSelector: string;
   healedSelector: string;
   source: SelectorResolutionSource;
   updatedAt: string;
+  lastVerifiedAt?: string;
+  timesUsed?: number;
+  testFile?: string;
+  pageObject?: string;
+  notes?: string;
 }
 
 export interface SelectorStore {
@@ -23,7 +34,8 @@ export class MemorySelectorStore implements SelectorStore {
   }
 
   set(record: HealedSelectorRecord): void {
-    this.records.set(record.originalSelector, record);
+    const previous = this.records.get(record.originalSelector);
+    this.records.set(record.originalSelector, mergeSelectorRecord(previous, record));
   }
 }
 
@@ -42,7 +54,10 @@ export class JsonFileSelectorStore implements SelectorStore {
 
   async set(record: HealedSelectorRecord): Promise<void> {
     const data = await this.readFile();
-    data.selectors[record.originalSelector] = record;
+    data.selectors[record.originalSelector] = mergeSelectorRecord(
+      data.selectors[record.originalSelector],
+      record
+    );
 
     await fs.mkdir(path.dirname(this.filePath), { recursive: true });
     await fs.writeFile(this.filePath, `${JSON.stringify(data, null, 2)}\n`, 'utf8');
@@ -81,4 +96,30 @@ export class ReadOnlySelectorStore implements SelectorStore {
   set(_record: HealedSelectorRecord): void {
     // Intentionally ignore writes in read-only mode.
   }
+}
+
+function mergeSelectorRecord(
+  previous: HealedSelectorRecord | undefined,
+  next: HealedSelectorRecord
+): HealedSelectorRecord {
+  const observedAt = next.lastVerifiedAt ?? next.updatedAt;
+  const changed =
+    !previous ||
+    previous.healedSelector !== next.healedSelector ||
+    previous.source !== next.source ||
+    previous.testFile !== next.testFile ||
+    previous.pageObject !== next.pageObject ||
+    previous.notes !== next.notes;
+
+  return {
+    originalSelector: next.originalSelector,
+    healedSelector: next.healedSelector,
+    source: next.source,
+    updatedAt: changed ? observedAt : previous.updatedAt,
+    lastVerifiedAt: observedAt,
+    timesUsed: (previous?.timesUsed ?? 0) + 1,
+    testFile: next.testFile ?? previous?.testFile,
+    pageObject: next.pageObject ?? previous?.pageObject,
+    notes: next.notes ?? previous?.notes,
+  };
 }

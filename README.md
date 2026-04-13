@@ -326,6 +326,38 @@ export class BasePage {
 }
 ```
 
+If you want the JSON file to show where the locator came from, pass context from the framework:
+
+```typescript
+import { Page } from '@playwright/test';
+import { createProjectSelfHealing } from 'playwright-ai-self-healing';
+
+export class LoginPage {
+  private readonly ai = createProjectSelfHealing({
+    selectorContext: {
+      pageObject: 'LoginPage',
+    },
+  });
+
+  constructor(private readonly page: Page) {}
+
+  async clickLogin() {
+    const locator = await this.ai.findElementUniversal(
+      this.page,
+      '[data-testid="login-button"]',
+      {
+        context: {
+          testFile: 'tests/login.spec.ts',
+          notes: 'primary login action',
+        },
+      }
+    );
+
+    await locator?.click();
+  }
+}
+```
+
 On the first successful local healing, the library writes an override like:
 
 ```json
@@ -336,13 +368,19 @@ On the first successful local healing, the library writes an override like:
       "originalSelector": "[data-testid=\"login-button\"]",
       "healedSelector": "#login-button-v2",
       "source": "healed",
-      "updatedAt": "2026-04-13T00:00:00.000Z"
+      "updatedAt": "2026-04-13T00:00:00.000Z",
+      "lastVerifiedAt": "2026-04-13T00:00:00.000Z",
+      "timesUsed": 1,
+      "pageObject": "LoginPage",
+      "testFile": "tests/login.spec.ts",
+      "notes": "primary login action"
     }
   }
 }
 ```
 
 On later runs, the saved selector is tried before running the similarity scan again.
+This makes the file readable for humans too: you can clearly see the old locator in `originalSelector` and the working replacement in `healedSelector`.
 
 If you need custom behavior, you can override the path or mode:
 

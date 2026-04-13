@@ -24,6 +24,7 @@ exports.DEFAULT_CONFIG = {
     debug: false, // Secure default: no debug logging
     selectorStore: undefined,
     useStoredSelectorsFirst: true,
+    selectorContext: undefined,
 };
 /**
  * AI Self-Healing Locator Library
@@ -96,11 +97,12 @@ class PlaywrightAISelfHealing {
     /**
      * Try a stored selector override and then fall back to the original selector
      */
-    async resolveStoredOrOriginal(page, originalSelector, timeout) {
+    async resolveStoredOrOriginal(page, originalSelector, timeout, context) {
         const storedSelector = await this.config.selectorStore?.get(originalSelector) ?? null;
         if (this.config.useStoredSelectorsFirst && storedSelector && storedSelector !== originalSelector) {
             const storedLocator = await this.tryLocator(page, storedSelector, timeout);
             if (storedLocator) {
+                await this.persistSelectorResolution(originalSelector, storedSelector, 'stored', context);
                 this.secureLog(`Using stored selector override: "${originalSelector}" -> "${storedSelector}"`);
                 return storedLocator;
             }
@@ -108,7 +110,7 @@ class PlaywrightAISelfHealing {
         }
         const originalLocator = await this.tryLocator(page, originalSelector, timeout);
         if (originalLocator) {
-            await this.persistSelectorResolution(originalSelector, originalSelector, 'original');
+            await this.persistSelectorResolution(originalSelector, originalSelector, 'original', context);
             return originalLocator;
         }
         return null;
@@ -116,15 +118,24 @@ class PlaywrightAISelfHealing {
     /**
      * Persist a selector resolution when a store is configured
      */
-    async persistSelectorResolution(originalSelector, healedSelector, source) {
+    async persistSelectorResolution(originalSelector, healedSelector, source, context) {
         if (!this.config.selectorStore) {
             return;
         }
+        const mergedContext = {
+            ...this.config.selectorContext,
+            ...context,
+        };
+        const observedAt = new Date().toISOString();
         const record = {
             originalSelector,
             healedSelector,
             source,
-            updatedAt: new Date().toISOString(),
+            updatedAt: observedAt,
+            lastVerifiedAt: observedAt,
+            testFile: mergedContext.testFile,
+            pageObject: mergedContext.pageObject,
+            notes: mergedContext.notes,
         };
         await this.config.selectorStore.set(record);
     }
@@ -134,11 +145,12 @@ class PlaywrightAISelfHealing {
      */
     async findElementUniversal(page, originalSelector, options = {}) {
         const timeout = options.timeout ?? this.config.findTimeout;
+        const context = options.context;
         // Security validation
         if (!this.isValidSelector(originalSelector)) {
             throw new Error('Invalid selector provided');
         }
-        const existingLocator = await this.resolveStoredOrOriginal(page, originalSelector, timeout);
+        const existingLocator = await this.resolveStoredOrOriginal(page, originalSelector, timeout, context);
         if (existingLocator) {
             return existingLocator;
         }
@@ -166,7 +178,7 @@ class PlaywrightAISelfHealing {
             if (!locator) {
                 return null;
             }
-            await this.persistSelectorResolution(originalSelector, healedSelector, 'healed');
+            await this.persistSelectorResolution(originalSelector, healedSelector, 'healed', context);
             this.secureLog(`Self-healing successful: "${originalSelector}" -> "${healedSelector}" (score: ${bestScore.toFixed(3)})`);
             return locator;
         }
@@ -178,11 +190,12 @@ class PlaywrightAISelfHealing {
      */
     async findElementSimple(page, originalSelector, options = {}) {
         const timeout = options.timeout ?? this.config.findTimeout;
+        const context = options.context;
         // Security validation
         if (!this.isValidSelector(originalSelector)) {
             throw new Error('Invalid selector provided');
         }
-        const existingLocator = await this.resolveStoredOrOriginal(page, originalSelector, timeout);
+        const existingLocator = await this.resolveStoredOrOriginal(page, originalSelector, timeout, context);
         if (existingLocator) {
             return existingLocator;
         }
@@ -196,7 +209,7 @@ class PlaywrightAISelfHealing {
                 if (!locator) {
                     continue;
                 }
-                await this.persistSelectorResolution(originalSelector, healedSelector, 'healed');
+                await this.persistSelectorResolution(originalSelector, healedSelector, 'healed', context);
                 this.secureLog(`Simple self-healing: "${originalSelector}" -> "${healedSelector}" (score: ${similarity.toFixed(3)})`);
                 return locator;
             }
@@ -209,11 +222,12 @@ class PlaywrightAISelfHealing {
      */
     async findElementComplex(page, originalSelector, options = {}) {
         const timeout = options.timeout ?? this.config.findTimeout;
+        const context = options.context;
         // Security validation
         if (!this.isValidSelector(originalSelector)) {
             throw new Error('Invalid selector provided');
         }
-        const existingLocator = await this.resolveStoredOrOriginal(page, originalSelector, timeout);
+        const existingLocator = await this.resolveStoredOrOriginal(page, originalSelector, timeout, context);
         if (existingLocator) {
             return existingLocator;
         }
@@ -235,7 +249,7 @@ class PlaywrightAISelfHealing {
             if (!locator) {
                 return null;
             }
-            await this.persistSelectorResolution(originalSelector, healedSelector, 'healed');
+            await this.persistSelectorResolution(originalSelector, healedSelector, 'healed', context);
             this.secureLog(`Complex self-healing: "${originalSelector}" -> "${healedSelector}" (score: ${bestCandidate.score.toFixed(3)})`);
             return locator;
         }
@@ -247,11 +261,12 @@ class PlaywrightAISelfHealing {
      */
     async findElementAdvanced(page, originalSelector, options = {}) {
         const timeout = options.timeout ?? this.config.findTimeout;
+        const context = options.context;
         // Security validation
         if (!this.isValidSelector(originalSelector)) {
             throw new Error('Invalid selector provided');
         }
-        const existingLocator = await this.resolveStoredOrOriginal(page, originalSelector, timeout);
+        const existingLocator = await this.resolveStoredOrOriginal(page, originalSelector, timeout, context);
         if (existingLocator) {
             return existingLocator;
         }
@@ -274,7 +289,7 @@ class PlaywrightAISelfHealing {
             if (!locator) {
                 return null;
             }
-            await this.persistSelectorResolution(originalSelector, healedSelector, 'healed');
+            await this.persistSelectorResolution(originalSelector, healedSelector, 'healed', context);
             this.secureLog(`Advanced self-healing: "${originalSelector}" -> "${healedSelector}" (score: ${bestScore.toFixed(3)})`);
             return locator;
         }

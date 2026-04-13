@@ -189,13 +189,23 @@ import { createProjectSelfHealing } from 'playwright-ai-self-healing';
 
 export class BasePage {
   protected page: Page;
-  protected ai = createProjectSelfHealing();
+  protected ai = createProjectSelfHealing({
+    selectorContext: {
+      pageObject: 'BasePage',
+    },
+  });
 }
 ```
 
 This gives you a reviewable artifact that can be pushed to the project without auto-rewriting page object source files. The default path is `playwright/.healed-selectors.json`.
 
 CI note: `createProjectSelfHealing()` also writes learned selectors on CI by default. If you want those updates to survive future CI runs, persist `playwright/.healed-selectors.json` through git, cache, or artifacts. If your pipeline must avoid writes, set `PLAYWRIGHT_AI_SELF_HEALING_STORE_MODE=read`.
+
+The saved JSON includes both the old selector and the working replacement:
+
+- `originalSelector`: what exists in the test code today
+- `healedSelector`: what self-healing successfully used at runtime
+- `pageObject`, `testFile`, `notes`: optional metadata you can pass from your framework
 
 ## 📊 Monitoring and Logging
 

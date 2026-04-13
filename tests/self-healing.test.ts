@@ -255,9 +255,17 @@ describe('PlaywrightAISelfHealing', () => {
     const ai = new PlaywrightAISelfHealing({
       minSimilarityThreshold: 0.2,
       selectorStore,
+      selectorContext: {
+        pageObject: 'LoginPage',
+      },
     });
 
-    await ai.findElementUniversal(page, '[data-testid="save-button"]');
+    await ai.findElementUniversal(page, '[data-testid="save-button"]', {
+      context: {
+        testFile: 'tests/login.spec.ts',
+        notes: 'login submit button',
+      },
+    });
 
     expect(selectorStore.get('[data-testid="save-button"]')).toBe('#save-button-renamed');
   });

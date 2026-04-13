@@ -1,9 +1,19 @@
 export type SelectorResolutionSource = 'stored' | 'original' | 'healed';
+export interface SelectorContext {
+    testFile?: string;
+    pageObject?: string;
+    notes?: string;
+}
 export interface HealedSelectorRecord {
     originalSelector: string;
     healedSelector: string;
     source: SelectorResolutionSource;
     updatedAt: string;
+    lastVerifiedAt?: string;
+    timesUsed?: number;
+    testFile?: string;
+    pageObject?: string;
+    notes?: string;
 }
 export interface SelectorStore {
     get(originalSelector: string): Promise<string | null> | string | null;
