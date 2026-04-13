@@ -88,7 +88,7 @@ class PlaywrightAISelfHealing {
         catch {
             // Original selector failed, attempt self-healing
         }
-        const allElements = await this.getAllPageElements(page);
+        const allElements = await this.getAllPageElements(page, true);
         this.secureLog(`Found ${allElements.length} elements on page for analysis`);
         let bestMatch = null;
         let bestScore = 0;
@@ -131,7 +131,7 @@ class PlaywrightAISelfHealing {
         catch {
             // Original selector failed, attempt self-healing
         }
-        const allElements = await this.getAllPageElements(page);
+        const allElements = await this.getAllPageElements(page, true);
         for (const element of allElements.slice(0, this.config.maxElementsToAnalyze)) {
             const elementText = await this.getElementIdentifier(element);
             const similarity = this.calculateLevenshteinSimilarity(originalSelector, elementText);
@@ -161,7 +161,7 @@ class PlaywrightAISelfHealing {
         catch {
             // Original selector failed, attempt self-healing
         }
-        const allElements = await this.getAllPageElements(page);
+        const allElements = await this.getAllPageElements(page, true);
         const candidates = [];
         for (const element of allElements.slice(0, this.config.maxElementsToAnalyze)) {
             const semanticScore = await this.calculateSemanticSimilarity(originalSelector, element);
@@ -198,7 +198,7 @@ class PlaywrightAISelfHealing {
         catch {
             // Original selector failed, attempt self-healing
         }
-        const allElements = await this.getAllPageElements(page);
+        const allElements = await this.getAllPageElements(page, true);
         const contextualElements = await this.getContextualElements(page, originalSelector);
         let bestMatch = null;
         let bestScore = 0;
@@ -221,10 +221,10 @@ class PlaywrightAISelfHealing {
     /**
      * Get all elements from page with caching
      */
-    async getAllPageElements(page) {
+    async getAllPageElements(page, forceRefresh = false) {
         const now = Date.now();
         const cached = this.domCache.get(page);
-        if (cached && (now - cached.timestamp) < this.config.domCacheTTL) {
+        if (!forceRefresh && cached && (now - cached.timestamp) < this.config.domCacheTTL) {
             return cached.elements;
         }
         const elements = await page.evaluate(() => {

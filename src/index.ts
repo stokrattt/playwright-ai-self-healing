@@ -131,7 +131,7 @@ export class PlaywrightAISelfHealing {
       // Original selector failed, attempt self-healing
     }
 
-    const allElements = await this.getAllPageElements(page);
+    const allElements = await this.getAllPageElements(page, true);
     this.secureLog(`Found ${allElements.length} elements on page for analysis`);
 
     let bestMatch: SerializedElement | null = null;
@@ -188,7 +188,7 @@ export class PlaywrightAISelfHealing {
       // Original selector failed, attempt self-healing
     }
 
-    const allElements = await this.getAllPageElements(page);
+    const allElements = await this.getAllPageElements(page, true);
 
     for (const element of allElements.slice(0, this.config.maxElementsToAnalyze)) {
       const elementText = await this.getElementIdentifier(element);
@@ -228,7 +228,7 @@ export class PlaywrightAISelfHealing {
       // Original selector failed, attempt self-healing
     }
 
-    const allElements = await this.getAllPageElements(page);
+    const allElements = await this.getAllPageElements(page, true);
     const candidates: Array<{ element: SerializedElement; score: number }> = [];
 
     for (const element of allElements.slice(0, this.config.maxElementsToAnalyze)) {
@@ -276,7 +276,7 @@ export class PlaywrightAISelfHealing {
       // Original selector failed, attempt self-healing
     }
 
-    const allElements = await this.getAllPageElements(page);
+    const allElements = await this.getAllPageElements(page, true);
     const contextualElements = await this.getContextualElements(page, originalSelector);
 
     let bestMatch: SerializedElement | null = null;
@@ -305,11 +305,14 @@ export class PlaywrightAISelfHealing {
   /**
    * Get all elements from page with caching
    */
-  private async getAllPageElements<TLocator extends PlaywrightLocator>(page: PlaywrightPage<TLocator>): Promise<SerializedElement[]> {
+  private async getAllPageElements<TLocator extends PlaywrightLocator>(
+    page: PlaywrightPage<TLocator>,
+    forceRefresh = false
+  ): Promise<SerializedElement[]> {
     const now = Date.now();
     const cached = this.domCache.get(page);
 
-    if (cached && (now - cached.timestamp) < this.config.domCacheTTL) {
+    if (!forceRefresh && cached && (now - cached.timestamp) < this.config.domCacheTTL) {
       return cached.elements;
     }
 
