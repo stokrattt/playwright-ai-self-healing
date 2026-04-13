@@ -111,11 +111,13 @@ export class PlaywrightAISelfHealing {
    * Universal self-healing method with comprehensive similarity analysis
    * Combines multiple algorithms for best accuracy
    */
-  async findElementUniversal(
-    page: PlaywrightPage,
+  async findElementUniversal<TLocator extends PlaywrightLocator>(
+    page: PlaywrightPage<TLocator>,
     originalSelector: string,
-    _options: { timeout?: number } = {}
-  ): Promise<PlaywrightLocator | null> {
+    options: SelfHealingOptions = {}
+  ): Promise<TLocator | null> {
+    const timeout = options.timeout ?? this.config.findTimeout;
+
     // Security validation
     if (!this.isValidSelector(originalSelector)) {
       throw new Error('Invalid selector provided');
@@ -123,7 +125,7 @@ export class PlaywrightAISelfHealing {
 
     try {
       const locator = page.locator(originalSelector);
-      await locator.waitFor({ timeout: 1000 });
+      await locator.waitFor({ timeout });
       return locator;
     } catch {
       // Original selector failed, attempt self-healing
@@ -166,11 +168,13 @@ export class PlaywrightAISelfHealing {
    * Simple self-healing method focused on speed
    * Uses basic string similarity for quick recovery
    */
-  async findElementSimple(
-    page: PlaywrightPage,
+  async findElementSimple<TLocator extends PlaywrightLocator>(
+    page: PlaywrightPage<TLocator>,
     originalSelector: string,
-    _options: { timeout?: number } = {}
-  ): Promise<PlaywrightLocator | null> {
+    options: SelfHealingOptions = {}
+  ): Promise<TLocator | null> {
+    const timeout = options.timeout ?? this.config.findTimeout;
+
     // Security validation
     if (!this.isValidSelector(originalSelector)) {
       throw new Error('Invalid selector provided');
@@ -178,7 +182,7 @@ export class PlaywrightAISelfHealing {
 
     try {
       const locator = page.locator(originalSelector);
-      await locator.waitFor({ timeout: 1000 });
+      await locator.waitFor({ timeout });
       return locator;
     } catch {
       // Original selector failed, attempt self-healing
@@ -204,11 +208,13 @@ export class PlaywrightAISelfHealing {
    * Complex self-healing method for advanced scenarios
    * Uses semantic analysis and structural comparison
    */
-  async findElementComplex(
-    page: PlaywrightPage,
+  async findElementComplex<TLocator extends PlaywrightLocator>(
+    page: PlaywrightPage<TLocator>,
     originalSelector: string,
-    _options: { timeout?: number } = {}
-  ): Promise<PlaywrightLocator | null> {
+    options: SelfHealingOptions = {}
+  ): Promise<TLocator | null> {
+    const timeout = options.timeout ?? this.config.findTimeout;
+
     // Security validation
     if (!this.isValidSelector(originalSelector)) {
       throw new Error('Invalid selector provided');
@@ -216,7 +222,7 @@ export class PlaywrightAISelfHealing {
 
     try {
       const locator = page.locator(originalSelector);
-      await locator.waitFor({ timeout: 1000 });
+      await locator.waitFor({ timeout });
       return locator;
     } catch {
       // Original selector failed, attempt self-healing
@@ -250,11 +256,13 @@ export class PlaywrightAISelfHealing {
    * Advanced self-healing method with machine learning approach
    * Uses pattern recognition and context analysis
    */
-  async findElementAdvanced(
-    page: PlaywrightPage,
+  async findElementAdvanced<TLocator extends PlaywrightLocator>(
+    page: PlaywrightPage<TLocator>,
     originalSelector: string,
-    _options: { timeout?: number } = {}
-  ): Promise<PlaywrightLocator | null> {
+    options: SelfHealingOptions = {}
+  ): Promise<TLocator | null> {
+    const timeout = options.timeout ?? this.config.findTimeout;
+
     // Security validation
     if (!this.isValidSelector(originalSelector)) {
       throw new Error('Invalid selector provided');
@@ -262,7 +270,7 @@ export class PlaywrightAISelfHealing {
 
     try {
       const locator = page.locator(originalSelector);
-      await locator.waitFor({ timeout: 1000 });
+      await locator.waitFor({ timeout });
       return locator;
     } catch {
       // Original selector failed, attempt self-healing
@@ -297,7 +305,7 @@ export class PlaywrightAISelfHealing {
   /**
    * Get all elements from page with caching
    */
-  private async getAllPageElements(page: PlaywrightPage): Promise<SerializedElement[]> {
+  private async getAllPageElements<TLocator extends PlaywrightLocator>(page: PlaywrightPage<TLocator>): Promise<SerializedElement[]> {
     const now = Date.now();
     const cached = this.domCache.get(page);
 
@@ -571,7 +579,10 @@ export class PlaywrightAISelfHealing {
   /**
    * Get contextual elements around the original selector
    */
-  private async getContextualElements(page: PlaywrightPage, originalSelector: string): Promise<SerializedElement[]> {
+  private async getContextualElements<TLocator extends PlaywrightLocator>(
+    page: PlaywrightPage<TLocator>,
+    originalSelector: string
+  ): Promise<SerializedElement[]> {
     try {
       return await page.evaluate((selector: string) => {
         const elements = document.querySelectorAll('*');
@@ -660,7 +671,10 @@ export class PlaywrightAISelfHealing {
   /**
    * Generate optimal selector for found element
    */
-  private async generateOptimalSelector(page: PlaywrightPage, element: SerializedElement): Promise<string> {
+  private async generateOptimalSelector<TLocator extends PlaywrightLocator>(
+    _page: PlaywrightPage<TLocator>,
+    element: SerializedElement
+  ): Promise<string> {
     try {
       // Generate selector based on SerializedElement properties
       if (element.id) return `#${element.id}`;

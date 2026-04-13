@@ -50,30 +50,22 @@ export declare class PlaywrightAISelfHealing {
      * Universal self-healing method with comprehensive similarity analysis
      * Combines multiple algorithms for best accuracy
      */
-    findElementUniversal(page: PlaywrightPage, originalSelector: string, _options?: {
-        timeout?: number;
-    }): Promise<PlaywrightLocator | null>;
+    findElementUniversal<TLocator extends PlaywrightLocator>(page: PlaywrightPage<TLocator>, originalSelector: string, options?: SelfHealingOptions): Promise<TLocator | null>;
     /**
      * Simple self-healing method focused on speed
      * Uses basic string similarity for quick recovery
      */
-    findElementSimple(page: PlaywrightPage, originalSelector: string, _options?: {
-        timeout?: number;
-    }): Promise<PlaywrightLocator | null>;
+    findElementSimple<TLocator extends PlaywrightLocator>(page: PlaywrightPage<TLocator>, originalSelector: string, options?: SelfHealingOptions): Promise<TLocator | null>;
     /**
      * Complex self-healing method for advanced scenarios
      * Uses semantic analysis and structural comparison
      */
-    findElementComplex(page: PlaywrightPage, originalSelector: string, _options?: {
-        timeout?: number;
-    }): Promise<PlaywrightLocator | null>;
+    findElementComplex<TLocator extends PlaywrightLocator>(page: PlaywrightPage<TLocator>, originalSelector: string, options?: SelfHealingOptions): Promise<TLocator | null>;
     /**
      * Advanced self-healing method with machine learning approach
      * Uses pattern recognition and context analysis
      */
-    findElementAdvanced(page: PlaywrightPage, originalSelector: string, _options?: {
-        timeout?: number;
-    }): Promise<PlaywrightLocator | null>;
+    findElementAdvanced<TLocator extends PlaywrightLocator>(page: PlaywrightPage<TLocator>, originalSelector: string, options?: SelfHealingOptions): Promise<TLocator | null>;
     /**
      * Get all elements from page with caching
      */

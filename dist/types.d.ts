@@ -2,15 +2,14 @@
  * Type definitions for Playwright integration
  * These types will be satisfied by the actual Playwright library when used as a peer dependency
  */
-export interface PlaywrightPage {
-    locator(selector: string): PlaywrightLocator;
-    evaluate<T>(fn: () => T): Promise<T>;
-    evaluate<T, A>(fn: (arg: A) => T, arg: A): Promise<T>;
-    evaluate<T, A1, A2>(fn: (arg1: A1, arg2: A2) => T, arg1: A1, arg2: A2): Promise<T>;
+export interface PlaywrightPage<TLocator extends PlaywrightLocator = PlaywrightLocator> {
+    locator(selector: string): TLocator;
+    evaluate<T>(fn: (...args: any[]) => T, ...args: any[]): Promise<T>;
 }
 export interface PlaywrightLocator {
     waitFor(options?: {
         timeout?: number;
+        state?: 'attached' | 'detached' | 'visible' | 'hidden';
     }): Promise<void>;
     fill(value: string): Promise<void>;
     click(): Promise<void>;

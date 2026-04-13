@@ -59,7 +59,7 @@ export class BasePage {
       console.log(`🔧 [AI Self-Healing] Original selector failed: ${selector}`);
       
       // Use AI to find element
-      const aiElement = await this.ai.findElementUniversal(this.page, selector, fallbackDescription);
+      const aiElement = await this.ai.findElementUniversal(this.page, selector, { timeout: 3000 });
       
       if (aiElement) {
         console.log(`✅ [AI Self-Healing] Element found with AI assistance`);
@@ -202,7 +202,7 @@ export class BasePage {
       this.aiUsageStats.aiActivations++;
       console.log(`🔧 [AI] Selector failed: ${selector}`);
       
-      const aiElement = await this.ai.findElementUniversal(this.page, selector, fallbackDescription);
+      const aiElement = await this.ai.findElementUniversal(this.page, selector, { timeout: 3000 });
       
       if (aiElement) {
         this.aiUsageStats.successfulHealing++;
@@ -302,7 +302,7 @@ export class EnhancedBasePage {
       await element.waitFor({ timeout: 2000 });
       return element;
     } catch {
-      const aiElement = await this.ai.findElementUniversal(this.page, selector, description);
+      const aiElement = await this.ai.findElementUniversal(this.page, selector, { timeout: 2000 });
       if (aiElement) return aiElement;
       return this.page.locator(selector); // Fallback to original
     }

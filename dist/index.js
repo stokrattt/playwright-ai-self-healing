@@ -74,14 +74,15 @@ class PlaywrightAISelfHealing {
      * Universal self-healing method with comprehensive similarity analysis
      * Combines multiple algorithms for best accuracy
      */
-    async findElementUniversal(page, originalSelector, _options = {}) {
+    async findElementUniversal(page, originalSelector, options = {}) {
+        const timeout = options.timeout ?? this.config.findTimeout;
         // Security validation
         if (!this.isValidSelector(originalSelector)) {
             throw new Error('Invalid selector provided');
         }
         try {
             const locator = page.locator(originalSelector);
-            await locator.waitFor({ timeout: 1000 });
+            await locator.waitFor({ timeout });
             return locator;
         }
         catch {
@@ -116,14 +117,15 @@ class PlaywrightAISelfHealing {
      * Simple self-healing method focused on speed
      * Uses basic string similarity for quick recovery
      */
-    async findElementSimple(page, originalSelector, _options = {}) {
+    async findElementSimple(page, originalSelector, options = {}) {
+        const timeout = options.timeout ?? this.config.findTimeout;
         // Security validation
         if (!this.isValidSelector(originalSelector)) {
             throw new Error('Invalid selector provided');
         }
         try {
             const locator = page.locator(originalSelector);
-            await locator.waitFor({ timeout: 1000 });
+            await locator.waitFor({ timeout });
             return locator;
         }
         catch {
@@ -145,14 +147,15 @@ class PlaywrightAISelfHealing {
      * Complex self-healing method for advanced scenarios
      * Uses semantic analysis and structural comparison
      */
-    async findElementComplex(page, originalSelector, _options = {}) {
+    async findElementComplex(page, originalSelector, options = {}) {
+        const timeout = options.timeout ?? this.config.findTimeout;
         // Security validation
         if (!this.isValidSelector(originalSelector)) {
             throw new Error('Invalid selector provided');
         }
         try {
             const locator = page.locator(originalSelector);
-            await locator.waitFor({ timeout: 1000 });
+            await locator.waitFor({ timeout });
             return locator;
         }
         catch {
@@ -181,14 +184,15 @@ class PlaywrightAISelfHealing {
      * Advanced self-healing method with machine learning approach
      * Uses pattern recognition and context analysis
      */
-    async findElementAdvanced(page, originalSelector, _options = {}) {
+    async findElementAdvanced(page, originalSelector, options = {}) {
+        const timeout = options.timeout ?? this.config.findTimeout;
         // Security validation
         if (!this.isValidSelector(originalSelector)) {
             throw new Error('Invalid selector provided');
         }
         try {
             const locator = page.locator(originalSelector);
-            await locator.waitFor({ timeout: 1000 });
+            await locator.waitFor({ timeout });
             return locator;
         }
         catch {
@@ -530,7 +534,7 @@ class PlaywrightAISelfHealing {
     /**
      * Generate optimal selector for found element
      */
-    async generateOptimalSelector(page, element) {
+    async generateOptimalSelector(_page, element) {
         try {
             // Generate selector based on SerializedElement properties
             if (element.id)

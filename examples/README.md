@@ -14,7 +14,7 @@ test('basic AI self-healing example', async ({ page }) => {
   await page.goto('https://example.com');
   
   // Even if this selector breaks, AI will find the element
-  const button = await ai.findElementUniversal(page, 'button[data-testid="submit"]', 'submit button');
+  const button = await ai.findElementUniversal(page, 'button[data-testid="submit"]');
   
   if (button) {
     await button.click();
@@ -41,7 +41,7 @@ export class BasePage {
     try {
       await this.page.locator(selector).click({ timeout: 3000 });
     } catch {
-      const element = await this.ai.findElementUniversal(this.page, selector, description);
+      const element = await this.ai.findElementUniversal(this.page, selector, { timeout: 3000 });
       if (element) await element.click();
       else throw new Error(`Element not found: ${selector}`);
     }

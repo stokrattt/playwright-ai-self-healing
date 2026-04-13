@@ -7,15 +7,15 @@
 
 An intelligent library for Playwright that provides self-healing element locators using AI algorithms. When standard selectors fail due to DOM changes, this library automatically finds the most similar elements using advanced similarity algorithms.
 
-## 🌟 Features
+## Features
 
-- **🧠 AI-Powered**: Advanced similarity algorithms combining Levenshtein distance, semantic analysis, and structural comparison
-- **🔧 Self-Healing**: Automatically adapts to DOM changes without manual intervention
-- **⚡ Performance**: Optimized with caching and configurable thresholds
-- **🔒 Secure**: Built-in input validation and secure logging
-- **📝 TypeScript**: Full TypeScript support with comprehensive type definitions
-- **🌐 Cross-Browser**: Supports Chromium, Firefox, and WebKit
-- **📦 Zero Dependencies**: No external dependencies except Playwright
+- **AI-Powered**: Advanced similarity algorithms combining Levenshtein distance, semantic analysis, and structural comparison
+- **Self-Healing**: Automatically adapts to DOM changes without manual intervention
+- **Performance**: Optimized with caching and configurable thresholds
+- **Secure**: Built-in input validation and secure logging
+- **TypeScript**: Full TypeScript support with comprehensive type definitions
+- **Cross-Browser**: Supports Chromium, Firefox, and WebKit
+- **Zero Dependencies**: No external dependencies except Playwright
 
 - **Multiple Similarity Algorithms**: Combines Levenshtein distance, semantic analysis, and structural comparison
 - **Performance Optimized**: Built-in caching and configurable thresholds for production use
@@ -26,7 +26,7 @@ An intelligent library for Playwright that provides self-healing element locator
 - **Security First**: Input validation, secure logging, and protection against common vulnerabilities
 - **Production Ready**: Secure defaults and comprehensive testing including security tests
 
-## 🚀 Quick Start
+## Quick Start
 
 Install the library using npm:
 
@@ -39,15 +39,15 @@ Basic usage:
 ```typescript
 import { PlaywrightAISelfHealing } from 'playwright-ai-self-healing';
 
-// Initialize with your page
-const ai = new PlaywrightAISelfHealing(page);
+// Create a self-healing instance
+const ai = new PlaywrightAISelfHealing();
 
 // Find element with self-healing capabilities
-const element = await ai.findElementUniversal('button[data-testid="submit"]');
+const element = await ai.findElementUniversal(page, 'button[data-testid="submit"]');
 await element?.click();
 ```
 
-## 📦 Installation
+## Installation
 
 Or using yarn:
 
@@ -55,11 +55,11 @@ Or using yarn:
 yarn add playwright-ai-self-healing
 ```
 
-## 🚀 Quick Integration in Your Project
+## Quick Integration in Your Project
 
-📖 **For comprehensive integration examples and advanced usage, see [INTEGRATION_GUIDE.md](./INTEGRATION_GUIDE.md)**
+**For comprehensive integration examples and advanced usage, see [INTEGRATION_GUIDE.md](./INTEGRATION_GUIDE.md)**
 
-## 🎯 Complete Usage Example
+## Complete Usage Example
 
 Here's how someone would use your library after downloading it:
 
@@ -90,13 +90,13 @@ export class BasePage {
       await element.waitFor({ timeout: 3000 });
       return element;
     } catch (error) {
-      console.log(`🔧 [AI] Selector failed: ${selector}`);
+      console.log(`[AI] Selector failed: ${selector}`);
       
       // Use AI to find element
-      const aiElement = await this.ai.findElementUniversal(this.page, selector, description);
+      const aiElement = await this.ai.findElementUniversal(this.page, selector, { timeout: 3000 });
       
       if (aiElement) {
-        console.log(`✅ [AI] Element found!`);
+        console.log(`[AI] Element found!`);
         return aiElement;
       }
       
@@ -138,17 +138,20 @@ export class LoginPage extends BasePage {
 // tests/login.test.ts
 test('login with AI self-healing', async ({ page }) => {
   const loginPage = new LoginPage(page);
+  const selfHealing = createSelfHealing();
   
   await page.goto('/login');
   
   // Even if developers change selectors, AI will find them
   await loginPage.login('user@example.com', 'password123');
   
-  await expect(page.locator('[data-testid="dashboard"]')).toBeVisible();
+  const dashboard = await selfHealing.findElementUniversal(page, '[data-testid="dashboard"]');
+  expect(dashboard).toBeTruthy();
+  await expect(dashboard!).toBeVisible();
 });
 ```
 
-**Result**: Your tests become resilient to UI changes! 🎉
+**Result**: Your tests become resilient to UI changes!
 yarn add playwright-ai-self-healing
 ```
 
@@ -194,10 +197,11 @@ test('Login with self-healing', async ({ page }) => {
     // Elements found successfully, continue with test
     console.log('All elements found with self-healing!');
     
-    // Now you can interact with the elements
-    await page.fill(await usernameField.locator, 'your-username');
-    await page.fill(await passwordField.locator, 'your-password');
+    // Returned values are native Playwright locators, so actions and expect() work normally
+    await usernameField.fill('your-username');
+    await passwordField.fill('your-password');
     await loginButton.click();
+    await expect(loginButton).toBeVisible();
   } else {
     throw new Error('Could not find required elements even with self-healing');
   }
@@ -288,6 +292,7 @@ const selfHealing = createSelfHealing({
 #### findElementUniversal(page, selector, options?)
 
 The most comprehensive method that combines all similarity algorithms for best accuracy.
+It preserves the concrete locator type returned by the provided `page`, so the result works with Playwright actions and assertions such as `await expect(locator).toBeVisible()`.
 
 ```typescript
 const element = await selfHealing.findElementUniversal(page, 'old-selector');
