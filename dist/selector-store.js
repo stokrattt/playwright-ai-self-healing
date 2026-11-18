@@ -58,10 +58,16 @@ class JsonFileSelectorStore {
         return data.selectors[originalSelector]?.healedSelector ?? null;
     }
     async set(record) {
-        const data = await this.readFile();
-        data.selectors[record.originalSelector] = mergeSelectorRecord(data.selectors[record.originalSelector], record);
         await fs_1.promises.mkdir(path.dirname(this.filePath), { recursive: true });
-        await fs_1.promises.writeFile(this.filePath, `${JSON.stringify(data, null, 2)}\n`, 'utf8');
+        // Parallel Playwright workers share this file: read-modify-write under a lock,
+        // and rename a temp file so no reader ever sees half-written JSON.
+        await withFileLock(this.filePath, async () => {
+            const data = await this.readFile();
+            data.selectors[record.originalSelector] = mergeSelectorRecord(data.selectors[record.originalSelector], record);
+            const tempPath = `${this.filePath}.${process.pid}.tmp`;
+            await fs_1.promises.writeFile(tempPath, `${JSON.stringify(data, null, 2)}\n`, 'utf8');
+            await fs_1.promises.rename(tempPath, this.filePath);
+        });
     }
     async readFile() {
         try {
@@ -97,6 +103,35 @@ class ReadOnlySelectorStore {
     }
 }
 exports.ReadOnlySelectorStore = ReadOnlySelectorStore;
+const LOCK_RETRY_MS = 20;
+const LOCK_STALE_MS = 10000;
+// ponytail: lock file, not a lock library. A lock older than LOCK_STALE_MS is treated as left by a
+// crashed worker and removed; two waiters removing it at once is possible but needs a crash first.
+async function withFileLock(filePath, fn) {
+    const lockPath = `${filePath}.lock`;
+    for (;;) {
+        try {
+            await (await fs_1.promises.open(lockPath, 'wx')).close();
+            break;
+        }
+        catch (error) {
+            if (error.code !== 'EEXIST') {
+                throw error;
+            }
+            const stat = await fs_1.promises.stat(lockPath).catch(() => null);
+            if (stat && Date.now() - stat.mtimeMs > LOCK_STALE_MS) {
+                await fs_1.promises.rm(lockPath, { force: true });
+            }
+            await new Promise(resolve => setTimeout(resolve, LOCK_RETRY_MS));
+        }
+    }
+    try {
+        await fn();
+    }
+    finally {
+        await fs_1.promises.rm(lockPath, { force: true });
+    }
+}
 function mergeSelectorRecord(previous, next) {
     const observedAt = next.lastVerifiedAt ?? next.updatedAt;
     const changed = !previous ||

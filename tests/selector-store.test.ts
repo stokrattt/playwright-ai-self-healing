@@ -84,4 +84,20 @@ describe('JsonFileSelectorStore', () => {
     expect(record.timesUsed).toBe(2);
     expect(record.pageObject).toBe('LoginPage');
   });
+
+  it('keeps every record when parallel workers write at once', async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'selector-store-'));
+    const storePath = path.join(tempDir, 'selector-overrides.json');
+
+    await Promise.all(Array.from({ length: 20 }, (_, i) => new JsonFileSelectorStore(storePath).set({
+      originalSelector: `#old-${i}`,
+      healedSelector: `#new-${i}`,
+      source: 'healed',
+      updatedAt: '2026-04-13T00:00:00.000Z',
+    })));
+
+    const writtenFile = JSON.parse(fs.readFileSync(storePath, 'utf8')) as { selectors: Record<string, unknown> };
+    expect(Object.keys(writtenFile.selectors)).toHaveLength(20);
+    expect(fs.existsSync(`${storePath}.lock`)).toBe(false);
+  });
 });

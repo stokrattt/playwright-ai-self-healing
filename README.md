@@ -5,258 +5,115 @@
 [![Node.js](https://img.shields.io/badge/Node.js-%3E%3D16.0.0-green.svg)](https://nodejs.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-An intelligent library for Playwright that provides self-healing element locators using AI algorithms. When standard selectors fail due to DOM changes, this library automatically finds the most similar elements using advanced similarity algorithms.
+Self-healing locators for Playwright. When a selector stops matching because an id, class or test id was renamed, the library finds the element that matches what the old selector described and uses it instead.
+It scores page elements with string and word similarity (no model, no network). An element that resembles nothing on the page is not healed: the test fails as it would without the library.
 
 ## Features
 
-- **AI-Powered**: Advanced similarity algorithms combining Levenshtein distance, semantic analysis, and structural comparison
-- **Self-Healing**: Automatically adapts to DOM changes without manual intervention
-- **Performance**: Optimized with caching and configurable thresholds
-- **Secure**: Built-in input validation and secure logging
-- **TypeScript**: Full TypeScript support with comprehensive type definitions
-- **Cross-Browser**: Supports Chromium, Firefox, and WebKit
-- **Zero Dependencies**: No external dependencies except Playwright
-
-- **Multiple Similarity Algorithms**: Combines Levenshtein distance, semantic analysis, and structural comparison
-- **Performance Optimized**: Built-in caching and configurable thresholds for production use
-- **Four Self-Healing Methods**: Universal, Simple, Complex, and Advanced approaches for different scenarios
-- **Zero Dependencies**: Minimal footprint with Playwright as the only peer dependency
-- **TypeScript Support**: Fully typed with comprehensive type definitions
-- **Configurable**: Extensive configuration options for fine-tuning behavior
-- **Security First**: Input validation, secure logging, and protection against common vulnerabilities
-- **Production Ready**: Secure defaults and comprehensive testing including security tests
-
-## Quick Start
-
-Install the library using npm:
-
-```bash
-npm install playwright-ai-self-healing
-```
-
-Basic usage:
-
-```typescript
-import { PlaywrightAISelfHealing } from 'playwright-ai-self-healing';
-
-// Create a self-healing instance
-const ai = new PlaywrightAISelfHealing();
-
-// Find element with self-healing capabilities
-const element = await ai.findElementUniversal(page, 'button[data-testid="submit"]');
-await element?.click();
-```
+- **Any action and any assertion**: `click`, `fill`, `toHaveText`, `toBeHidden`, `toHaveCount` and the rest work on a healed locator
+- **No test changes needed**: with `enableAutoHealing(page)`, the selectors your tests already write heal on their own
+- **Readable healed locators**: test id first, then Playwright's `getBy*` locators, CSS, XPath
+- **CSS, XPath, test ids, open shadow DOM, iframes, chained locators**
+- **Refuses look-alikes**: `#confirm-button` does not heal into `#cancel-button`, a missing element stays missing
+- **Selector store**: `findElementUniversal` can save every healed selector to a JSON file for review
+- **TypeScript**, no runtime dependencies besides Playwright; tested with Playwright 1.65 on Chromium
 
 ## Installation
 
-Or using yarn:
-
 ```bash
-yarn add playwright-ai-self-healing
+npm install --save-dev playwright-ai-self-healing
 ```
 
-## Quick Integration in Your Project
+## Choose how to use it
 
-**For comprehensive integration examples and advanced usage, see [INTEGRATION_GUIDE.md](./INTEGRATION_GUIDE.md)**
+| Way | You write | Heals | Writes the selector store |
+|-----|-----------|-------|---------------------------|
+| `enableAutoHealing(page)` | ordinary tests: `page.locator('#save')`, `page.getByTestId('save')` | every action and assertion | no |
+| `heal=` prefix | `page.locator('heal=#save')` where you want healing | every action and assertion | no |
+| `findElementUniversal()` | `await ai.findElementUniversal(page, '#save')`, usually in a `BasePage` | the call that returns the locator | yes |
 
-## Complete Usage Example
+The first two need one `fixtures.ts` in your project, shown below.
+The third needs nothing else, and it is the way to get a file of which old selector healed into which new one.
 
-Here's how someone would use your library after downloading it:
+## Quick Start: heal the tests you already have
 
-### Step 1: Install
-```bash
-npm install playwright-ai-self-healing
+```typescript
+// tests/fixtures.ts
+import { test as base } from '@playwright/test';
+import { createSelfHealing } from 'playwright-ai-self-healing';
+
+const ai = createSelfHealing();
+
+export const test = base.extend<{}, { healEngine: void }>({
+  healEngine: [async ({ playwright }, use) => {
+    await ai.registerSelectorEngine(playwright.selectors); // teaches Playwright the heal= engine, once per worker
+    await use();
+  }, { scope: 'worker', auto: true }],
+  page: async ({ page }, use) => {
+    ai.enableAutoHealing(page); // plain selectors of this page heal
+    await use(page);
+  },
+});
+export { expect } from '@playwright/test';
 ```
 
-### Step 2: Create BasePage with AI
+In your specs, import `test` and `expect` from this file instead of `@playwright/test`:
+
+```typescript
+import { test, expect } from './fixtures';
+
+test('checkout', async ({ page }) => {
+  await page.goto('/cart');
+  await page.getByTestId('checkout-submit').click();               // test id renamed to checkout-submit-v2: still found
+  await expect(page.locator('#order-total')).toHaveText('100 EUR'); // id renamed: still found
+});
+```
+
+Drop the `page` override to heal only where you write `heal=`.
+
+## Quick Start: findElementUniversal
+
+```typescript
+import { createSelfHealing } from 'playwright-ai-self-healing';
+
+const ai = createSelfHealing();
+
+// Returns a Playwright locator: the original if it still matches, else the healed one, else null.
+const submit = await ai.findElementUniversal(page, '[data-testid="submit"]');
+if (!submit) throw new Error('submit button not found');
+await submit.click();
+await expect(submit).toBeEnabled();
+```
+
+In a page object, put it behind one helper:
+
 ```typescript
 // framework/core/BasePage.ts
-import { Page } from '@playwright/test';
-import { PlaywrightAISelfHealing } from 'playwright-ai-self-healing';
+import { Page, Locator } from '@playwright/test';
+import { createProjectSelfHealing } from 'playwright-ai-self-healing';
+
+const ai = createProjectSelfHealing(); // saves healed selectors to playwright/.healed-selectors.json
 
 export class BasePage {
-  protected page: Page;
-  protected ai: PlaywrightAISelfHealing;
+  constructor(protected page: Page) {}
 
-  constructor(page: Page) {
-    this.page = page;
-    this.ai = new PlaywrightAISelfHealing();
-  }
-
-  protected async findElementWithAI(selector: string, description?: string) {
-    try {
-      // Try normal selector first
-      const element = this.page.locator(selector);
-      await element.waitFor({ timeout: 3000 });
-      return element;
-    } catch (error) {
-      console.log(`[AI] Selector failed: ${selector}`);
-      
-      // Use AI to find element
-      const aiElement = await this.ai.findElementUniversal(this.page, selector, { timeout: 3000 });
-      
-      if (aiElement) {
-        console.log(`[AI] Element found!`);
-        return aiElement;
-      }
-      
-      throw new Error(`Element not found: ${selector}`);
-    }
-  }
-
-  protected async clickWithAI(selector: string, description?: string) {
-    const element = await this.findElementWithAI(selector, description);
-    await element.click();
-  }
-
-  protected async fillWithAI(selector: string, value: string, description?: string) {
-    const element = await this.findElementWithAI(selector, description);
-    await element.fill(value);
+  protected async find(selector: string): Promise<Locator> {
+    const locator = await ai.findElementUniversal(this.page, selector, { context: { pageObject: this.constructor.name } });
+    if (!locator) throw new Error(`Element not found: ${selector}`);
+    return locator;
   }
 }
 ```
 
-### Step 3: Create Page Objects
-```typescript
-// page-objects/LoginPage.ts
-export class LoginPage extends BasePage {
-  private readonly emailInput = '[data-testid="email-input"]';
-  private readonly passwordInput = '[data-testid="password-input"]';
-  private readonly loginButton = '[data-testid="login-button"]';
+For more integration patterns see [INTEGRATION_GUIDE.md](./INTEGRATION_GUIDE.md).
 
-  async login(email: string, password: string) {
-    // AI will find elements even if selectors change!
-    await this.fillWithAI(this.emailInput, email, 'email input field');
-    await this.fillWithAI(this.passwordInput, password, 'password input field');
-    await this.clickWithAI(this.loginButton, 'login submit button');
-  }
-}
-```
+### Fast First Match
 
-### Step 4: Use in Tests
-```typescript
-// tests/login.test.ts
-test('login with AI self-healing', async ({ page }) => {
-  const loginPage = new LoginPage(page);
-  const selfHealing = createSelfHealing();
-  
-  await page.goto('/login');
-  
-  // Even if developers change selectors, AI will find them
-  await loginPage.login('user@example.com', 'password123');
-  
-  const dashboard = await selfHealing.findElementUniversal(page, '[data-testid="dashboard"]');
-  expect(dashboard).toBeTruthy();
-  await expect(dashboard!).toBeVisible();
-});
-```
-
-**Result**: Your tests become resilient to UI changes!
-yarn add playwright-ai-self-healing
-```
-
-### Prerequisites
-
-Make sure you have Playwright installed in your project:
-
-```bash
-npm install @playwright/test
-```
-
-## Quick Start
-
-## Quick Start
-
-### Step 1: Import the library
+`findElementSimple` takes the first element above the threshold instead of the best one.
+Use it when speed matters more than picking the closest of several look-alikes.
 
 ```typescript
-import { createSelfHealing } from 'playwright-ai-self-healing';
-import { test, expect } from '@playwright/test';
-```
-
-### Step 2: Create a self-healing instance
-
-```typescript
-const selfHealing = createSelfHealing();
-```
-
-### Step 3: Use in your Playwright tests
-
-```typescript
-test('Login with self-healing', async ({ page }) => {
-  const selfHealing = createSelfHealing();
-  
-  await page.goto('https://example.com/login');
-  
-  // These selectors might change, but self-healing will find them
-  const usernameField = await selfHealing.findElementUniversal(page, 'username-input');
-  const passwordField = await selfHealing.findElementUniversal(page, 'password-input');
-  const loginButton = await selfHealing.findElementUniversal(page, 'login-button');
-  
-  if (usernameField && passwordField && loginButton) {
-    // Elements found successfully, continue with test
-    console.log('All elements found with self-healing!');
-    
-    // Returned values are native Playwright locators, so actions and expect() work normally
-    await usernameField.fill('your-username');
-    await passwordField.fill('your-password');
-    await loginButton.click();
-    await expect(loginButton).toBeVisible();
-  } else {
-    throw new Error('Could not find required elements even with self-healing');
-  }
-});
-```
-
-## Usage Examples
-
-### Basic Element Finding
-
-```typescript
-import { createSelfHealing } from 'playwright-ai-self-healing';
-
-// In your test
-const selfHealing = createSelfHealing();
-
-// Find an element that might have changed
-const submitButton = await selfHealing.findElementUniversal(page, 'old-submit-btn');
-
-if (submitButton) {
-  await submitButton.click();
-}
-```
-
-### Progressive Recovery Strategy
-
-```typescript
-async function findElementWithFallback(page, selector) {
-  const selfHealing = createSelfHealing();
-  
-  // Try simple method first (fastest)
-  let element = await selfHealing.findElementSimple(page, selector);
-  
-  if (!element) {
-    // Try complex method (more thorough)
-    element = await selfHealing.findElementComplex(page, selector);
-  }
-  
-  if (!element) {
-    // Try advanced method (most comprehensive)
-    element = await selfHealing.findElementAdvanced(page, selector);
-  }
-  
-  return element;
-}
-
-// Usage in test
-test('Form submission with fallback', async ({ page }) => {
-  await page.goto('https://example.com/form');
-  
-  const submitBtn = await findElementWithFallback(page, 'submit-button');
-  if (submitBtn) {
-    await submitBtn.click();
-  }
-});
+const submitBtn = await ai.findElementSimple(page, 'submit-button');
 ```
 
 ## API Reference
@@ -267,7 +124,7 @@ Creates a new instance of the PlaywrightAISelfHealing class.
 
 ```typescript
 const selfHealing = createSelfHealing({
-  minSimilarityThreshold: 0.2,
+  minSimilarityThreshold: 0.4,
   levenshteinWeight: 0.8,
   semanticWeight: 0.15,
   structuralWeight: 0.05,
@@ -278,13 +135,14 @@ const selfHealing = createSelfHealing({
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `minSimilarityThreshold` | number | 0.1 | Minimum similarity score (0-1) to consider a match |
-| `levenshteinWeight` | number | 0.7 | Weight for Levenshtein distance algorithm |
-| `semanticWeight` | number | 0.2 | Weight for semantic similarity algorithm |
-| `structuralWeight` | number | 0.1 | Weight for structural similarity algorithm |
+| `minSimilarityThreshold` | number | 0.4 | Minimum similarity score (0-1) to consider a match |
+| `levenshteinWeight` | number | 0.7 | Weight of character similarity between a selector value and the element's value |
+| `semanticWeight` | number | 0.2 | Weight of shared words (`save-button` vs `save-button-v2`) |
+| `structuralWeight` | number | 0.1 | Weight of a matching tag or role; counts only when the selector names a tag |
 | `domCacheTTL` | number | 30000 | DOM cache time-to-live in milliseconds |
-| `maxElementsToAnalyze` | number | 50 | Maximum number of elements to analyze |
+| `maxElementsToAnalyze` | number | 50 | Maximum number of elements to analyze; interactive and identifiable elements are taken first |
 | `findTimeout` | number | 5000 | Timeout for finding elements in milliseconds |
+| `healAfterMs` | number | 1000 | `heal=` engine: how long the original selector may be missing before healing starts |
 | `debug` | boolean | false | Enable debug logging (disable in production for security) |
 | `selectorStore` | `SelectorStore` | `undefined` | Optional store for reusing and persisting working selectors |
 | `useStoredSelectorsFirst` | boolean | `true` | Try a saved selector override before retrying the original selector |
@@ -388,7 +246,7 @@ If you need custom behavior, you can override the path or mode:
 import { createProjectSelfHealing } from 'playwright-ai-self-healing';
 
 const ai = createProjectSelfHealing(
-  { minSimilarityThreshold: 0.2 },
+  { minSimilarityThreshold: 0.4 },
   {
     selectorStorePath: './qa/healed-selectors.json',
     selectorStoreMode: 'read-write',
@@ -466,44 +324,118 @@ Fastest method using basic string similarity for quick recovery.
 const element = await selfHealing.findElementSimple(page, 'btn-submit');
 ```
 
-#### findElementComplex(page, selector, options?)
+#### findElementComplex / findElementAdvanced (deprecated)
 
-Uses semantic analysis and structural comparison for advanced scenarios.
+Both call `findElementUniversal` and are kept only so existing code keeps compiling.
 
-```typescript
-const element = await selfHealing.findElementComplex(page, 'search-input');
-```
+## Assertions: the `heal=` selector engine
 
-#### findElementAdvanced(page, selector, options?)
-
-Most sophisticated method with pattern recognition and context analysis.
+`findElement*` heals once, when you call it.
+For assertions, register the selector engine and prefix the selector with `heal=`.
+Playwright runs the engine on every retry of an action or an `expect`, so every matcher works on a renamed element: `toHaveText`, `toBeHidden`, `toHaveValue`, `toBeChecked`, `toHaveAttribute`, `toHaveCount` and the rest.
 
 ```typescript
-const element = await selfHealing.findElementAdvanced(page, 'login-form');
+// fixtures.ts
+import { test as base, selectors } from '@playwright/test';
+import { createSelfHealing } from 'playwright-ai-self-healing';
+
+const ai = createSelfHealing();
+
+export const test = base.extend<{}, { healEngine: void }>({
+  healEngine: [async ({}, use) => {
+    await ai.registerSelectorEngine(selectors); // once per worker, before pages are created
+    await use();
+  }, { scope: 'worker', auto: true }],
+});
+export { expect } from '@playwright/test';
 ```
+
+```typescript
+await expect(page.locator('heal=#balance-amount')).toHaveText('100 EUR');
+await expect(page.locator('heal=//button[@id="pay-now"]')).toBeEnabled();
+await page.locator('heal=[data-testid="login-submit"]').click();
+```
+
+- The original selector is used while it matches anything. Healing starts only after it has matched nothing for `healAfterMs` (default 1000), so a page that is still rendering does not get a look-alike. Keep assertion timeouts above that value.
+- CSS (including open shadow DOM) and XPath originals are supported. A Playwright-only selector (`role=`, `text=`) always goes through scoring.
+- A renamed list heals as a list: the best match plus its siblings with the same tag, class and score, so `toHaveCount(3)` still works.
+- A selector whose values match nothing on the page stays missing, so `toHaveCount(0)` still passes.
+- For a "this element must be gone" check, use a plain locator: a similar element would otherwise stand in for the removed one.
+- The engine does not write the selector store. Use `findElementUniversal` when you want the healed selector saved.
+
+## Auto-healing: no `heal=` prefix
+
+`enableAutoHealing(page)` makes the selectors your tests already write heal on their own.
+Add it to a `page` fixture next to the engine registration:
+
+```typescript
+// fixtures.ts
+import { test as base } from '@playwright/test';
+import { createSelfHealing } from 'playwright-ai-self-healing';
+
+const ai = createSelfHealing();
+
+export const test = base.extend<{}, { healEngine: void }>({
+  healEngine: [async ({ playwright }, use) => {
+    await ai.registerSelectorEngine(playwright.selectors); // once per worker
+    await use();
+  }, { scope: 'worker', auto: true }],
+  page: async ({ page }, use) => {
+    ai.enableAutoHealing(page); // every locator of this page heals
+    await use(page);
+  },
+});
+export { expect } from '@playwright/test';
+```
+
+```typescript
+await expect(page.locator('#balance-amount')).toHaveText('100 EUR'); // heals a renamed id
+await page.getByTestId('login-submit').click();                       // heals a renamed test id
+await expect(page.locator('//button[@id="pay-now"]')).toBeEnabled();  // XPath too
+```
+
+What heals: `page.locator()`, `getByTestId()`, chained locators and `frameLocator().locator()`, with CSS or XPath.
+What stays as Playwright resolves it:
+
+- `getByRole`, `getByText`, `getByLabel`, `getByPlaceholder`, `getByAltText`, `getByTitle`: their matching rules are Playwright's own.
+- A selector with an explicit engine. Write `css=#id` for a check that the element must be gone, so a look-alike cannot stand in.
+- `>>` chains and Playwright-only CSS such as `:has-text()` or `:visible`.
+- The older selector-taking methods: `page.click('#id')`, `page.fill()`, `page.$()`, `waitForSelector()`.
+
+It works by wrapping `locator()` of Playwright's Frame, Locator and FrameLocator classes, and only for pages passed to `enableAutoHealing`.
+Tested with Playwright 1.65.
+
+## Healed locator priority
+
+When `findElement*` heals, it saves the first locator that matches only the healed element, in this order:
+
+1. Test id: `data-testid`, `data-test-id`, `data-test`, `data-qa`
+2. Playwright locators, in the order Playwright's docs recommend, saved as the selector strings they compile to:
+   `getByRole` (`internal:role=button[name="Save"s]`), `getByText`, `getByLabel`, `getByPlaceholder`, `getByAltText`, `getByTitle`
+3. CSS: `#id`, `[name]`, `[aria-label]`, `a[href]`, `tag.class`
+4. XPath: by text, then by position, which always matches
+
+Each saved string works with `page.locator()`, and it is saved only after it resolved to the same element that was scored.
 
 ## Similarity Algorithms
 
-### LEVENSHTEIN (70% weight by default)
-Measures string similarity using edit distance with enhanced substring matching:
-- Perfect match: 1.0 similarity
-- Prefix match (e.g., 'pass' in 'pass-input'): +0.8 bonus
-- Substring match: +0.6 bonus
+The selector is split into the values it identifies an element by: `#id`, `.class`,
+`[attr="value"]`, `text=...`, `:has-text(...)`, or a bare word such as `save-button`.
+Each value is compared with the element's value of the same attribute, and with its other identifying values (id, test id, name, classes, accessible name, aria-label, placeholder, title, text) at a discount.
+A bare word is compared with all of them at full weight.
+Two rules keep look-alikes out:
 
-### SEMANTIC (20% weight by default)
-Analyzes element properties and content:
-- Compares text content, placeholders, IDs, and class names
-- Word-based matching with partial word support
-- Context-aware scoring
+- A word that only names the kind of element (`button`, `btn`, `input`, `field`, `link`, ...) cannot carry a match alone: `#confirm-button` does not heal into `#cancel-button`.
+- A word that names this element's own kind is also compared without it: `.toggle-checkbox` on a checkbox reads as `toggle`, not `toggle-all`.
 
-### STRUCTURAL (10% weight by default)
-Examines DOM structure and element properties:
-- Tag name matching
-- Class name similarity
-- ID attribute comparison
-- Element hierarchy analysis
+| Part | Default weight | What it measures |
+|------|----------------|------------------|
+| Characters | 0.7 (`levenshteinWeight`) | Edit distance: `login-btn` vs `login-button` |
+| Words | 0.2 (`semanticWeight`) | Shared words, camelCase split: `user-email` vs `userEmail` |
+| Tag or role | 0.1 (`structuralWeight`) | `button.x` vs a `<button>` or `role="button"`; skipped when the selector names no tag |
 
-## Examples
+On the library's calibration set, renamed elements score 0.63 and above and unrelated ones 0.13 and below, so the default threshold is 0.4.
+`html` and `body` are never candidates, and the healed selector is built in the page so that it matches exactly one element.
 
 ## Examples
 
@@ -512,27 +444,22 @@ Examines DOM structure and element properties:
 Replace your existing element finding with self-healing:
 
 ```typescript
-// Before (traditional Playwright)
-test('old way', async ({ page }) => {
-  await page.click('#submit-btn'); // Breaks if selector changes
-});
+// Before: breaks when #submit-btn is renamed
+await page.locator('#submit-btn').click();
 
-// After (with self-healing)
-test('new way', async ({ page }) => {
-  const selfHealing = createSelfHealing();
-  const submitBtn = await selfHealing.findElementUniversal(page, 'submit-btn');
-  
-  if (submitBtn) {
-    await submitBtn.click();
-  }
-});
+// After, with enableAutoHealing in your fixture: the same line keeps working
+await page.locator('#submit-btn').click();
+
+// Or explicitly, without the fixture
+const submitBtn = await createSelfHealing().findElementUniversal(page, '#submit-btn');
+await submitBtn?.click();
 ```
 
 ### Custom Configuration
 
 ```typescript
 const selfHealing = createSelfHealing({
-  minSimilarityThreshold: 0.3,  // Higher threshold for stricter matching
+  minSimilarityThreshold: 0.5,  // Higher threshold for stricter matching
   levenshteinWeight: 0.6,       // Reduce string similarity weight
   semanticWeight: 0.3,          // Increase semantic weight
   structuralWeight: 0.1,        // Keep structural weight low
@@ -563,50 +490,43 @@ test('Add product to cart with self-healing', async ({ page }) => {
 });
 ```
 
-## Performance Considerations
+## Performance
 
-- **Caching**: DOM elements are cached with configurable TTL to avoid repeated queries
-- **Similarity Cache**: Calculated similarities are cached to prevent redundant computations
-- **Element Limits**: Configurable maximum number of elements to analyze
-- **Early Exit**: Algorithms use early exit strategies when high similarity is found
+Measured on demo.playwright.dev/todomvc, a 7-step test with 5 renamed locators, Chromium, Playwright 1.65:
+
+| Run | Time |
+|-----|------|
+| Correct locators, no healing | 0.6 s |
+| Correct locators, `enableAutoHealing` on | 0.7 s |
+| Renamed locators, `enableAutoHealing` or `heal=` | 8-9 s |
+| Renamed locators, `findElementUniversal` | 31 s |
+
+A working selector costs nothing extra.
+A renamed one costs about 1.5 s with `heal=` (`healAfterMs`, 1000 ms by default, plus Playwright's retry interval) and about 5 s with `findElementUniversal`, which first waits `findTimeout` for the original.
+Lower either value to heal faster, at the risk of healing an element that was only slow to render.
 
 ## Troubleshooting
 
 ### Common Issues
 
 **Q: The library returns `null` even though the element exists**
-A: Try lowering the `minSimilarityThreshold` or adjusting the algorithm weights:
-
-```typescript
-const selfHealing = createSelfHealing({
-  minSimilarityThreshold: 0.05, // Lower threshold
-  levenshteinWeight: 0.8,       // Increase string matching
-});
-```
+A: Enable `debug` to see the best scores, then lower `minSimilarityThreshold` a little (0.3).
+Below that, unrelated elements start to pass.
 
 **Q: Self-healing is too slow**
-A: Use the simple method or reduce the number of elements analyzed:
+A: Most of the time is waiting for the original selector, not scoring. Lower `healAfterMs` (for `heal=` and auto-healing) or `findTimeout` (for `findElement*`):
 
 ```typescript
 const selfHealing = createSelfHealing({
-  maxElementsToAnalyze: 20,  // Fewer elements
-  findTimeout: 3000,         // Shorter timeout
+  healAfterMs: 500,
+  findTimeout: 2000,
 });
-
-// Or use the faster method
-const element = await selfHealing.findElementSimple(page, selector);
 ```
+
+Then fix the selector in the test: healing is a safety net, the healed selector is printed with `debug: true` and saved by the selector store.
 
 **Q: False positives - wrong elements are found**
-A: Increase the similarity threshold or adjust weights:
-
-```typescript
-const selfHealing = createSelfHealing({
-  minSimilarityThreshold: 0.4,  // Higher threshold
-  semanticWeight: 0.4,          // More semantic matching
-  structuralWeight: 0.2,        // More structural matching
-});
-```
+A: Raise `minSimilarityThreshold` (0.5), or name the tag in the selector (`button#save` instead of `#save`) so `structuralWeight` can tell a button from a link.
 
 **Q: How to debug what's happening**
 A: Enable debug mode to see detailed logging:
@@ -634,17 +554,19 @@ See [SECURITY.md](./SECURITY.md) for detailed security information.
 
 ## Testing
 
-Run the test suite:
+Run the unit tests (jest, no browser):
 
 ```bash
 npm test
 ```
 
-Run with coverage:
+Run the real-browser tests (Playwright Test, `tests/e2e`), after `npm run build`:
 
 ```bash
-npm run test:coverage
+npm run test:e2e -- --project=chromium
 ```
+
+`PW_CHROMIUM_PATH` points the chromium project at a local browser binary when the bundled one is not installed.
 
 ## Building
 
@@ -667,23 +589,17 @@ npm run build
 
 ## License
 
-MIT © [Your Name](https://github.com/your-username)
+MIT © [stokrattt](https://github.com/stokrattt)
 
 ## Changelog
 
-### 1.0.0
-- Initial release
-- Four self-healing methods (Universal, Simple, Complex, Advanced)
-- Three similarity algorithms (Levenshtein, Semantic, Structural)
-- Performance optimizations with caching
-- Comprehensive TypeScript support
-- Full test coverage
+See [CHANGELOG.md](./CHANGELOG.md).
 
 ## Support
 
 If you encounter any issues or have questions:
 
-1. Check the [GitHub Issues](https://github.com/your-username/playwright-ai-self-healing/issues)
+1. Check the [GitHub Issues](https://github.com/stokrattt/playwright-ai-self-healing/issues)
 2. Create a new issue if your problem isn't already reported
 3. Provide minimal reproduction code and environment details
 

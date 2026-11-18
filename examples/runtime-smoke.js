@@ -1,4 +1,4 @@
-const { chromium } = require('playwright');
+const { chromium, selectors } = require('playwright');
 const { expect } = require('@playwright/test');
 const { PlaywrightAISelfHealing } = require('../dist');
 
@@ -91,19 +91,97 @@ async function runVisibilityScenario(page, ai) {
   console.log('PASS visible -> healed locator works with expect(...).toBeVisible()');
 }
 
+async function runUniqueSelectorScenario(page, ai) {
+  const filler = Array.from({ length: 40 }, (_, i) => `<p>row ${i}</p>`).join('');
+  await page.setContent(`
+    <html>
+      <body>
+        ${filler}
+        <div role="button">Cancel</div>
+        <div role="button" onclick="window.__saved = true">Save</div>
+      </body>
+    </html>
+  `);
+
+  // Both candidates share role="button", and the target sits past maxElementsToAnalyze in DOM order.
+  const healedButton = await ai.findElementUniversal(page, 'save-btn', { timeout: 500 });
+  if (!healedButton) {
+    throw new Error('Unique selector scenario: healed button was not found');
+  }
+
+  await healedButton.click();
+  const saved = await page.evaluate(() => window.__saved === true);
+  if (!saved) {
+    throw new Error('Unique selector scenario: the click did not land on the Save button');
+  }
+
+  console.log('PASS unique -> healed selector picks one element among look-alikes');
+}
+
+async function runAssertionEngineScenario(page) {
+  await page.setContent(`
+    <html>
+      <body>
+        <span id="balance-amount-v2">100 EUR</span>
+        <div id="toast-success-v2" style="display:none">Saved</div>
+        <input type="hidden" name="csrf-token-v2" value="abc" />
+        <h1>Welcome</h1>
+      </body>
+    </html>
+  `);
+
+  // The heal= engine runs on every assertion retry, so any matcher works on a renamed element.
+  await expect(page.locator('heal=#balance-amount')).toHaveText('100 EUR', { timeout: 3000 });
+  await expect(page.locator('heal=#toast-success')).toBeHidden({ timeout: 3000 });
+  await expect(page.locator('heal=input[name="csrf-token"]')).toHaveValue('abc', { timeout: 3000 });
+  // Nothing on the page resembles it, so it must stay missing instead of healing into the heading.
+  await expect(page.locator('heal=#delete-account')).toHaveCount(0, { timeout: 3000 });
+
+  console.log('PASS assertions -> heal= locator works with toHaveText, toBeHidden, toHaveValue, toHaveCount');
+}
+
+async function runLocatorPriorityScenario(page) {
+  const { MemorySelectorStore } = require('../dist');
+  const store = new MemorySelectorStore();
+  const ai = new PlaywrightAISelfHealing({ findTimeout: 500, selectorStore: store });
+
+  const expectations = [
+    ['<button data-test-id="buy-now-btn" id="buy">Buy</button>', '[data-test-id="buy-now"]', '[data-test-id="buy-now-btn"]'],
+    ['<button class="btn">Place order</button><button class="btn">Cancel</button>', '#place-order-btn', 'internal:role=button[name="Place order"s]'],
+    ['<div class="promo-banner-v2"></div><div class="footer"></div>', '.promo-banner', 'div.promo-banner-v2'],
+    ['<div><span class="tag">a</span></div><div><span class="tag">a</span></div>', 'span.tag-a', 'xpath=/html[1]/body[1]/div[1]/span[1]'],
+  ];
+
+  for (const [html, original, expected] of expectations) {
+    await page.setContent(html);
+    await ai.findElementUniversal(page, original);
+    const healed = store.get(original);
+    if (healed !== expected) {
+      throw new Error(`Locator priority scenario: ${original} healed to ${healed}, expected ${expected}`);
+    }
+  }
+
+  console.log('PASS priority -> test id, then getBy*, then CSS, then XPath');
+}
+
 async function main() {
-  const browser = await chromium.launch({ headless: true });
-  const page = await browser.newPage();
   const ai = new PlaywrightAISelfHealing({
-    minSimilarityThreshold: 0.2,
+    minSimilarityThreshold: 0.4,
     maxElementsToAnalyze: 25,
     findTimeout: 500,
   });
+  await ai.registerSelectorEngine(selectors);
+
+  const browser = await chromium.launch({ headless: true });
+  const page = await browser.newPage();
 
   try {
     await runClickScenario(page, ai);
     await runTypeScenario(page, ai);
     await runVisibilityScenario(page, ai);
+    await runUniqueSelectorScenario(page, ai);
+    await runAssertionEngineScenario(page);
+    await runLocatorPriorityScenario(page);
     console.log('All runtime smoke scenarios passed');
   } finally {
     await browser.close();

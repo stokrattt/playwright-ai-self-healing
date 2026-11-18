@@ -5,7 +5,15 @@
 import type { SelectorContext } from './selector-store';
 export interface PlaywrightPage<TLocator extends PlaywrightLocator = PlaywrightLocator> {
     locator(selector: string): TLocator;
-    evaluate<T>(fn: (...args: any[]) => T, ...args: any[]): Promise<T>;
+    evaluate<T>(fn: string | ((...args: any[]) => T), ...args: any[]): Promise<T>;
+}
+/**
+ * Playwright's `selectors` object, used to register the `heal=` selector engine
+ */
+export interface PlaywrightSelectors {
+    register(name: string, script: {
+        content: string;
+    }): Promise<void>;
 }
 export interface PlaywrightLocator {
     waitFor(options?: {
@@ -34,7 +42,12 @@ export interface SerializedElement {
     href: string;
     src: string;
     alt: string;
-    _element?: Element;
+    /** Value of `data-testid` */
+    testId?: string;
+    /** Computed accessible name, as getByRole and getByLabel see it */
+    accessibleName?: string;
+    /** Locators built in the page for this element, best first: test id, getBy*, CSS, XPath */
+    selectors?: string[];
 }
 /**
  * Self-healing method options

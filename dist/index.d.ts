@@ -1,6 +1,6 @@
-import { PlaywrightPage, PlaywrightLocator, SelfHealingOptions, ElementMatch, SerializedElement } from './types';
+import { PlaywrightPage, PlaywrightLocator, PlaywrightSelectors, SelfHealingOptions, ElementMatch, SerializedElement } from './types';
 import { HealedSelectorRecord, SelectorContext, SelectorResolutionSource, SelectorStore, MemorySelectorStore, JsonFileSelectorStore, ReadOnlySelectorStore } from './selector-store';
-export { PlaywrightPage, PlaywrightLocator, SelfHealingOptions, ElementMatch, SerializedElement };
+export { PlaywrightPage, PlaywrightLocator, PlaywrightSelectors, SelfHealingOptions, ElementMatch, SerializedElement };
 export { HealedSelectorRecord, SelectorContext, SelectorResolutionSource, SelectorStore, MemorySelectorStore, JsonFileSelectorStore, ReadOnlySelectorStore, };
 export type ProjectSelectorStoreMode = 'off' | 'read' | 'read-write';
 export interface ProjectSelfHealingOptions {
@@ -40,6 +40,8 @@ export interface SelfHealingConfig {
     useStoredSelectorsFirst: boolean;
     /** Optional metadata attached to persisted selector records */
     selectorContext?: SelectorContext;
+    /** `heal=` engine: how long the original selector may stay missing before healing starts, in ms */
+    healAfterMs: number;
 }
 /**
  * Default configuration optimized for performance
@@ -51,6 +53,7 @@ export declare const DEFAULT_CONFIG: SelfHealingConfig;
  */
 export declare class PlaywrightAISelfHealing {
     private config;
+    private engineName;
     private domCache;
     private similarityCache;
     constructor(config?: Partial<SelfHealingConfig>);
@@ -89,47 +92,51 @@ export declare class PlaywrightAISelfHealing {
      */
     findElementSimple<TLocator extends PlaywrightLocator>(page: PlaywrightPage<TLocator>, originalSelector: string, options?: SelfHealingOptions): Promise<TLocator | null>;
     /**
-     * Complex self-healing method for advanced scenarios
-     * Uses semantic analysis and structural comparison
+     * @deprecated Same scoring as findElementUniversal, which it calls. Kept for API compatibility.
      */
     findElementComplex<TLocator extends PlaywrightLocator>(page: PlaywrightPage<TLocator>, originalSelector: string, options?: SelfHealingOptions): Promise<TLocator | null>;
     /**
-     * Advanced self-healing method with machine learning approach
-     * Uses pattern recognition and context analysis
+     * @deprecated Same scoring as findElementUniversal, which it calls. Kept for API compatibility.
      */
     findElementAdvanced<TLocator extends PlaywrightLocator>(page: PlaywrightPage<TLocator>, originalSelector: string, options?: SelfHealingOptions): Promise<TLocator | null>;
+    /**
+     * Register a selector engine that heals inside the page: `page.locator('heal=#old-id')`.
+     * Playwright re-runs it on every retry, so any action and any `expect` assertion work on it.
+     * Call once before pages are created, e.g. in a worker fixture: `await ai.registerSelectorEngine(selectors)`.
+     * The engine keeps the original selector while it matches, and heals only after it has been
+     * missing for `healAfterMs`. It does not write the selector store.
+     */
+    registerSelectorEngine(selectors: PlaywrightSelectors, name?: string): Promise<void>;
+    /**
+     * Heal the selectors this page's tests already write, with no `heal=` prefix:
+     * `page.locator('#old')`, `page.getByTestId('old')`, chained and frame locators.
+     * Call per page after registerSelectorEngine(), e.g. in a `page` fixture override.
+     * Left as Playwright resolves them: getByRole/Text/Label/Placeholder/AltText/Title, explicit engines
+     * (`css=#id` opts a selector out), `>>` chains, Playwright-only CSS such as `:has-text()`, and the
+     * older selector-taking methods (`page.click('#id')`, `page.$`, `waitForSelector`).
+     */
+    enableAutoHealing(page: AutoHealPage): void;
+    /**
+     * Try the element's locators in priority order (test id, getBy*, CSS, XPath) and keep the first
+     * one Playwright resolves to a single element.
+     */
+    private lockHealedLocator;
+    /**
+     * Whether the locator resolves to the element the XPath points at. True when it cannot be checked:
+     * no anchor (an element in shadow DOM) or a locator without evaluate (a test double).
+     */
+    private isSameElement;
     /**
      * Get all elements from page with caching
      */
     private getAllPageElements;
     /**
-     * Calculate comprehensive similarity using multiple algorithms
+     * Score how well an element matches what the selector identified it by.
+     * Each value in the selector (`#id`, `.class`, `[attr="v"]`, text, a bare word) is compared with
+     * the element's value of the same attribute: characters (levenshteinWeight) and words (semanticWeight).
+     * structuralWeight rewards the same tag or role, and only counts when the selector names a tag.
      */
     private calculateComprehensiveSimilarity;
-    /**
-     * Calculate Levenshtein distance-based similarity
-     */
-    private calculateLevenshteinSimilarity;
-    /**
-     * Calculate semantic similarity based on element properties
-     */
-    private calculateSemanticSimilarity;
-    /**
-     * Calculate structural similarity based on DOM properties
-     */
-    private calculateStructuralSimilarity;
-    /**
-     * Calculate pattern similarity for advanced matching
-     */
-    private calculatePatternSimilarity;
-    /**
-     * Calculate contextual relevance
-     */
-    private calculateContextualRelevance;
-    /**
-     * Get contextual elements around the original selector
-     */
-    private getContextualElements;
     /**
      * Get element identifier for comparison
      */
@@ -148,6 +155,19 @@ export declare class PlaywrightAISelfHealing {
      */
     clearCache(): void;
 }
+/**
+ * The parts of a Playwright Page that auto-healing needs
+ */
+export interface AutoHealPage {
+    locator(selector: string): object;
+    mainFrame(): object;
+    frameLocator(selector: string): object;
+}
+/**
+ * Prefix a selector the test wrote with the healing engine, or leave it for Playwright.
+ * getByTestId compiles to `internal:testid=[attr="value"s]`, which becomes the same CSS attribute match.
+ */
+export declare function toHealingSelector(selector: string, engine?: string): string;
 /**
  * Create a new instance of PlaywrightAISelfHealing
  */

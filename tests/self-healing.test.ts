@@ -28,7 +28,7 @@ describe('PlaywrightAISelfHealing', () => {
     const result = await ai.findElementUniversal(page, '[data-testid="submit"]', { timeout: 2500 });
 
     expect(result).toBe(locator);
-    expect(locator.waitFor).toHaveBeenCalledWith({ timeout: 2500 });
+    expect(locator.waitFor).toHaveBeenCalledWith({ timeout: 2500, state: 'attached' });
   });
 
   it('returns a healed locator when the original selector stops working', async () => {
@@ -268,5 +268,49 @@ describe('PlaywrightAISelfHealing', () => {
     });
 
     expect(selectorStore.get('[data-testid="save-button"]')).toBe('#save-button-renamed');
+  });
+
+  describe('with the default threshold', () => {
+    const element = (overrides: Partial<SerializedElement>): SerializedElement => ({
+      tagName: 'div', id: '', className: '', textContent: '', placeholder: '', name: '', type: '',
+      role: '', ariaLabel: '', title: '', value: '', href: '', src: '', alt: '', ...overrides,
+    });
+
+    function pageWith(elements: SerializedElement[]) {
+      const missing = createLocator(async () => {
+        throw new Error('not found');
+      });
+      const found = createLocator();
+      const page: PlaywrightPage<MockLocator> = {
+        locator: jest.fn((selector: string) => elements.some(e => e.selectors?.includes(selector)) ? found : missing),
+        evaluate: jest.fn(async () => elements) as unknown as PlaywrightPage<MockLocator>['evaluate'],
+      };
+      return { page, found };
+    }
+
+    it.each([
+      ['#delete-account', [element({ tagName: 'h1', textContent: 'Welcome', selectors: ['h1'] }),
+        element({ tagName: 'a', textContent: 'Logout', href: '/x', selectors: ['a'] })]],
+      ['input[name="phone"]', [element({ tagName: 'h2', textContent: 'Profile', selectors: ['h2'] }),
+        element({ tagName: 'button', id: 'save', textContent: 'Save', selectors: ['#save'] })]],
+      ['#confirm-payment', [element({ tagName: 'button', id: 'cancel-order', textContent: 'Cancel', selectors: ['#cancel-order'] })]],
+    ])('does not heal %s into an unrelated element', async (selector, elements) => {
+      const { page } = pageWith(elements);
+      const ai = new PlaywrightAISelfHealing({ findTimeout: 100 });
+
+      await expect(ai.findElementUniversal(page, selector)).resolves.toBeNull();
+    });
+
+    it.each([
+      ['#checkout-submit', element({ tagName: 'button', id: 'checkout-submit-v2', selectors: ['#checkout-submit-v2'] })],
+      ['[data-testid="login-submit"]', element({ tagName: 'button', testId: 'login-submit-btn', selectors: ['button[data-testid="login-submit-btn"]'] })],
+      ['#user-email', element({ tagName: 'input', id: 'userEmail', selectors: ['#userEmail'] })],
+    ])('heals %s into its renamed element', async (selector, target) => {
+      const { page, found } = pageWith([element({ tagName: 'p', textContent: 'Unrelated', selectors: ['p'] }), target]);
+      const ai = new PlaywrightAISelfHealing({ findTimeout: 100 });
+
+      await expect(ai.findElementUniversal(page, selector)).resolves.toBe(found);
+      expect(page.locator).toHaveBeenLastCalledWith(target.selectors?.[0]);
+    });
   });
 });

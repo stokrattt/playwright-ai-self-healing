@@ -5,7 +5,7 @@ import { defineConfig, devices } from '@playwright/test';
  * @see https://playwright.dev/docs/test-configuration
  */
 export default defineConfig({
-  testDir: './tests',
+  testDir: './tests/e2e',
   /* Run tests in parallel */
   fullyParallel: true,
   /* Forbid tests in production CI */
@@ -38,6 +38,7 @@ export default defineConfig({
         // Additional settings for Google tests
         viewport: { width: 1280, height: 720 },
         ignoreHTTPSErrors: true,
+        launchOptions: { executablePath: process.env.PW_CHROMIUM_PATH },
       },
     },
 

@@ -5,6 +5,39 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- `enableAutoHealing(page)`: `page.locator('#old')`, `getByTestId()`, chained and frame locators heal with no `heal=` prefix; `toHealingSelector()` shows how a selector is rewritten
+- `registerSelectorEngine(selectors)` registers a `heal=` selector engine: `page.locator('heal=#old')` heals on every retry, so any action and any `expect` assertion works on a renamed element
+- Healed locators follow a priority: test id, Playwright `getBy*` locators, CSS, XPath
+- `healAfterMs` (default 1000): the `heal=` engine waits this long for the original selector before healing
+- `heal=` and `findElement*` see elements inside open shadow roots
+- Original selectors may be XPath (`//button[@id="x"]`, `xpath=...`) or Playwright selectors (`role=`, `internal:label=`, `text=`)
+
+### Changed
+- Development and tests use `@playwright/test` 1.65.1
+- An original selector counts as working when it is attached, not only when it is visible
+- Hidden elements are healing candidates, ranked after visible ones
+- `SerializedElement._element` removed (a DOM node never survived serialization); `selectors` and `accessibleName` added
+- Scoring compares each value in the selector (`#id`, `.class`, `[attr="v"]`, text, a bare word) with the element's value of the same attribute instead of comparing the whole selector string with an element summary
+- Default `minSimilarityThreshold` raised from 0.1 to 0.4
+- `findElementSimple` uses the same scoring and returns the first match above the threshold
+- `findElementComplex` and `findElementAdvanced` are deprecated and call `findElementUniversal`
+- Interactive and identifiable elements are analyzed first, so `maxElementsToAnalyze` no longer drops a target that sits late in the DOM
+- A store write happens only when a healed or reset selector changes, not on every healthy lookup
+
+### Fixed
+- A word in the old selector that names the element's kind (`.toggle-checkbox`) pulled in a sibling control (`.toggle-all`); found on demo.playwright.dev/todomvc
+- A hidden but existing element (a loader, a `type=hidden` input) was treated as missing and healed into another element
+- A missing element healed into `<html>` or an unrelated element on the page
+- The healed selector could match several elements and fail Playwright's strict mode
+- Ids with special characters (`:r1:`) produced an invalid selector
+- SVG elements broke class matching
+- Parallel writes to `JsonFileSelectorStore` lost records; writes now go under a lock file and an atomic rename
+- A cached similarity score was returned without clamping to 1
+- Google-specific scoring bonuses (`btnK`, Gmail, Images, search field names) removed
+
 ## [1.0.2] - 2026-04-13
 
 ### Added

@@ -1,4 +1,5 @@
-import { PlaywrightPage, PlaywrightLocator, SelfHealingOptions, ElementMatch, SerializedElement } from './types';
+import { PlaywrightPage, PlaywrightLocator, PlaywrightSelectors, SelfHealingOptions, ElementMatch, SerializedElement } from './types';
+import { collectElementsScript, healingEngineScript, scoreElement } from './page-scripts';
 import {
   HealedSelectorRecord,
   SelectorContext,
@@ -10,7 +11,7 @@ import {
 } from './selector-store';
 
 // Re-export types for convenience
-export { PlaywrightPage, PlaywrightLocator, SelfHealingOptions, ElementMatch, SerializedElement };
+export { PlaywrightPage, PlaywrightLocator, PlaywrightSelectors, SelfHealingOptions, ElementMatch, SerializedElement };
 export {
   HealedSelectorRecord,
   SelectorContext,
@@ -62,13 +63,15 @@ export interface SelfHealingConfig {
   useStoredSelectorsFirst: boolean;
   /** Optional metadata attached to persisted selector records */
   selectorContext?: SelectorContext;
+  /** `heal=` engine: how long the original selector may stay missing before healing starts, in ms */
+  healAfterMs: number;
 }
 
 /**
  * Default configuration optimized for performance
  */
 export const DEFAULT_CONFIG: SelfHealingConfig = {
-  minSimilarityThreshold: 0.1,
+  minSimilarityThreshold: 0.4,
   levenshteinWeight: 0.7,
   semanticWeight: 0.2,
   structuralWeight: 0.1,
@@ -79,6 +82,7 @@ export const DEFAULT_CONFIG: SelfHealingConfig = {
   selectorStore: undefined,
   useStoredSelectorsFirst: true,
   selectorContext: undefined,
+  healAfterMs: 1000,
 };
 
 /**
@@ -95,6 +99,7 @@ interface CacheEntry {
  */
 export class PlaywrightAISelfHealing {
   private config: SelfHealingConfig;
+  private engineName: string | undefined;
   private domCache = new WeakMap<PlaywrightPage, CacheEntry>();
   private similarityCache = new Map<string, number>();
 
@@ -117,6 +122,9 @@ export class PlaywrightAISelfHealing {
     }
     if (this.config.findTimeout < 100 || this.config.findTimeout > 60000) {
       throw new Error('findTimeout must be between 100ms and 60000ms');
+    }
+    if (this.config.healAfterMs < 0 || this.config.healAfterMs > 60000) {
+      throw new Error('healAfterMs must be between 0ms and 60000ms');
     }
   }
 
@@ -159,7 +167,8 @@ export class PlaywrightAISelfHealing {
   ): Promise<TLocator | null> {
     try {
       const locator = page.locator(selector);
-      await locator.waitFor({ timeout });
+      // 'attached': a hidden element still exists, and assertions like toBeHidden need it as is.
+      await locator.waitFor({ timeout, state: 'attached' });
       return locator;
     } catch {
       return null;
@@ -190,7 +199,10 @@ export class PlaywrightAISelfHealing {
 
     const originalLocator = await this.tryLocator(page, originalSelector, timeout);
     if (originalLocator) {
-      await this.persistSelectorResolution(originalSelector, originalSelector, 'original', context);
+      // Write only to reset a stale override: a store write on every healthy lookup is pure disk I/O.
+      if (storedSelector && storedSelector !== originalSelector) {
+        await this.persistSelectorResolution(originalSelector, originalSelector, 'original', context);
+      }
       return originalLocator;
     }
 
@@ -276,15 +288,14 @@ export class PlaywrightAISelfHealing {
     this.secureLog(`Best match score: ${bestScore.toFixed(3)}, threshold: ${this.config.minSimilarityThreshold}`);
 
     if (bestMatch) {
-      const healedSelector = await this.generateOptimalSelector(page, bestMatch);
-      const locator = await this.tryLocator(page, healedSelector, timeout);
-      if (!locator) {
+      const healed = await this.lockHealedLocator(page, bestMatch, timeout);
+      if (!healed) {
         return null;
       }
 
-      await this.persistSelectorResolution(originalSelector, healedSelector, 'healed', context);
-      this.secureLog(`Self-healing successful: "${originalSelector}" -> "${healedSelector}" (score: ${bestScore.toFixed(3)})`);
-      return locator;
+      await this.persistSelectorResolution(originalSelector, healed.selector, 'healed', context);
+      this.secureLog(`Self-healing successful: "${originalSelector}" -> "${healed.selector}" (score: ${bestScore.toFixed(3)})`);
+      return healed.locator;
     }
 
     return null;
@@ -315,19 +326,17 @@ export class PlaywrightAISelfHealing {
     const allElements = await this.getAllPageElements(page, true);
 
     for (const element of allElements.slice(0, this.config.maxElementsToAnalyze)) {
-      const elementText = await this.getElementIdentifier(element);
-      const similarity = this.calculateLevenshteinSimilarity(originalSelector, elementText);
+      const similarity = await this.calculateComprehensiveSimilarity(originalSelector, element);
 
       if (similarity >= this.config.minSimilarityThreshold) {
-        const healedSelector = await this.generateOptimalSelector(page, element);
-        const locator = await this.tryLocator(page, healedSelector, timeout);
-        if (!locator) {
+        const healed = await this.lockHealedLocator(page, element, timeout);
+        if (!healed) {
           continue;
         }
 
-        await this.persistSelectorResolution(originalSelector, healedSelector, 'healed', context);
-        this.secureLog(`Simple self-healing: "${originalSelector}" -> "${healedSelector}" (score: ${similarity.toFixed(3)})`);
-        return locator;
+        await this.persistSelectorResolution(originalSelector, healed.selector, 'healed', context);
+        this.secureLog(`Simple self-healing: "${originalSelector}" -> "${healed.selector}" (score: ${similarity.toFixed(3)})`);
+        return healed.locator;
       }
     }
 
@@ -335,109 +344,105 @@ export class PlaywrightAISelfHealing {
   }
 
   /**
-   * Complex self-healing method for advanced scenarios
-   * Uses semantic analysis and structural comparison
+   * @deprecated Same scoring as findElementUniversal, which it calls. Kept for API compatibility.
    */
   async findElementComplex<TLocator extends PlaywrightLocator>(
     page: PlaywrightPage<TLocator>,
     originalSelector: string,
     options: SelfHealingOptions = {}
   ): Promise<TLocator | null> {
-    const timeout = options.timeout ?? this.config.findTimeout;
-    const context = options.context;
-
-    // Security validation
-    if (!this.isValidSelector(originalSelector)) {
-      throw new Error('Invalid selector provided');
-    }
-
-    const existingLocator = await this.resolveStoredOrOriginal(page, originalSelector, timeout, context);
-    if (existingLocator) {
-      return existingLocator;
-    }
-
-    const allElements = await this.getAllPageElements(page, true);
-    const candidates: Array<{ element: SerializedElement; score: number }> = [];
-
-    for (const element of allElements.slice(0, this.config.maxElementsToAnalyze)) {
-      const semanticScore = await this.calculateSemanticSimilarity(originalSelector, element);
-      const structuralScore = await this.calculateStructuralSimilarity(originalSelector, element);
-      const totalScore = (semanticScore * 0.6) + (structuralScore * 0.4);
-
-      if (totalScore >= this.config.minSimilarityThreshold) {
-        candidates.push({ element, score: totalScore });
-      }
-    }
-
-    if (candidates.length > 0) {
-      candidates.sort((a, b) => b.score - a.score);
-      const bestCandidate = candidates[0];
-      const healedSelector = await this.generateOptimalSelector(page, bestCandidate.element);
-      const locator = await this.tryLocator(page, healedSelector, timeout);
-      if (!locator) {
-        return null;
-      }
-
-      await this.persistSelectorResolution(originalSelector, healedSelector, 'healed', context);
-      this.secureLog(`Complex self-healing: "${originalSelector}" -> "${healedSelector}" (score: ${bestCandidate.score.toFixed(3)})`);
-      return locator;
-    }
-
-    return null;
+    return this.findElementUniversal(page, originalSelector, options);
   }
 
   /**
-   * Advanced self-healing method with machine learning approach
-   * Uses pattern recognition and context analysis
+   * @deprecated Same scoring as findElementUniversal, which it calls. Kept for API compatibility.
    */
   async findElementAdvanced<TLocator extends PlaywrightLocator>(
     page: PlaywrightPage<TLocator>,
     originalSelector: string,
     options: SelfHealingOptions = {}
   ): Promise<TLocator | null> {
-    const timeout = options.timeout ?? this.config.findTimeout;
-    const context = options.context;
+    return this.findElementUniversal(page, originalSelector, options);
+  }
 
-    // Security validation
-    if (!this.isValidSelector(originalSelector)) {
-      throw new Error('Invalid selector provided');
+  /**
+   * Register a selector engine that heals inside the page: `page.locator('heal=#old-id')`.
+   * Playwright re-runs it on every retry, so any action and any `expect` assertion work on it.
+   * Call once before pages are created, e.g. in a worker fixture: `await ai.registerSelectorEngine(selectors)`.
+   * The engine keeps the original selector while it matches, and heals only after it has been
+   * missing for `healAfterMs`. It does not write the selector store.
+   */
+  async registerSelectorEngine(selectors: PlaywrightSelectors, name = 'heal'): Promise<void> {
+    this.engineName = name;
+    const {
+      minSimilarityThreshold, maxElementsToAnalyze, levenshteinWeight, semanticWeight, structuralWeight, healAfterMs,
+    } = this.config;
+    await selectors.register(name, {
+      content: healingEngineScript({
+        minSimilarityThreshold, maxElementsToAnalyze, levenshteinWeight, semanticWeight, structuralWeight, healAfterMs,
+      }),
+    });
+  }
+
+  /**
+   * Heal the selectors this page's tests already write, with no `heal=` prefix:
+   * `page.locator('#old')`, `page.getByTestId('old')`, chained and frame locators.
+   * Call per page after registerSelectorEngine(), e.g. in a `page` fixture override.
+   * Left as Playwright resolves them: getByRole/Text/Label/Placeholder/AltText/Title, explicit engines
+   * (`css=#id` opts a selector out), `>>` chains, Playwright-only CSS such as `:has-text()`, and the
+   * older selector-taking methods (`page.click('#id')`, `page.$`, `waitForSelector`).
+   */
+  enableAutoHealing(page: AutoHealPage): void {
+    if (!this.engineName) {
+      throw new Error('Call registerSelectorEngine() before enableAutoHealing()');
     }
+    installAutoHealing(page);
+    autoHealEngines.set(page, this.engineName);
+  }
 
-    const existingLocator = await this.resolveStoredOrOriginal(page, originalSelector, timeout, context);
-    if (existingLocator) {
-      return existingLocator;
-    }
+  /**
+   * Try the element's locators in priority order (test id, getBy*, CSS, XPath) and keep the first
+   * one Playwright resolves to a single element.
+   */
+  private async lockHealedLocator<TLocator extends PlaywrightLocator>(
+    page: PlaywrightPage<TLocator>,
+    element: SerializedElement,
+    timeout: number
+  ): Promise<{ locator: TLocator; selector: string } | null> {
+    const candidates = element.selectors?.length ? element.selectors : [this.generateOptimalSelector(element)];
+    // The element is on the page right now, so a candidate that does not resolve quickly is wrong.
+    const candidateTimeout = Math.min(timeout, 1000);
+    // The positional XPath points at exactly the scored element; every other candidate must agree with it.
+    const anchor = candidates.find(candidate => /^xpath=\/[^/]/.test(candidate))?.slice('xpath='.length);
 
-    const allElements = await this.getAllPageElements(page, true);
-    const contextualElements = await this.getContextualElements(page, originalSelector);
-
-    let bestMatch: SerializedElement | null = null;
-    let bestScore = 0;
-
-    for (const element of allElements.slice(0, this.config.maxElementsToAnalyze)) {
-      const patternScore = await this.calculatePatternSimilarity(originalSelector, element, contextualElements);
-      const contextScore = await this.calculateContextualRelevance(element, contextualElements);
-      const totalScore = (patternScore * 0.7) + (contextScore * 0.3);
-
-      if (totalScore > bestScore && totalScore >= this.config.minSimilarityThreshold) {
-        bestScore = totalScore;
-        bestMatch = element;
+    for (const selector of candidates) {
+      const locator = await this.tryLocator(page, selector, candidateTimeout);
+      if (locator && await this.isSameElement(locator, anchor)) {
+        return { locator, selector };
       }
     }
-
-    if (bestMatch) {
-      const healedSelector = await this.generateOptimalSelector(page, bestMatch);
-      const locator = await this.tryLocator(page, healedSelector, timeout);
-      if (!locator) {
-        return null;
-      }
-
-      await this.persistSelectorResolution(originalSelector, healedSelector, 'healed', context);
-      this.secureLog(`Advanced self-healing: "${originalSelector}" -> "${healedSelector}" (score: ${bestScore.toFixed(3)})`);
-      return locator;
-    }
-
     return null;
+  }
+
+  /**
+   * Whether the locator resolves to the element the XPath points at. True when it cannot be checked:
+   * no anchor (an element in shadow DOM) or a locator without evaluate (a test double).
+   */
+  private async isSameElement(locator: PlaywrightLocator, anchorXPath: string | undefined): Promise<boolean> {
+    const { evaluate } = locator as unknown as {
+      evaluate?: (fn: (el: Element, xpath: string) => boolean, xpath: string) => Promise<boolean>;
+    };
+    if (!anchorXPath || typeof evaluate !== 'function') {
+      return true;
+    }
+
+    try {
+      return await evaluate.call(locator, (el, xpath) => el.ownerDocument.evaluate(
+        xpath, el.ownerDocument, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null
+      ).singleNodeValue === el, anchorXPath);
+    } catch {
+      return false;
+    }
   }
 
   /**
@@ -454,305 +459,35 @@ export class PlaywrightAISelfHealing {
       return cached.elements;
     }
 
-    const elements = await page.evaluate(() => {
-      return Array.from(document.querySelectorAll('*'))
-        .filter(el => {
-          const rect = el.getBoundingClientRect();
-          return rect.width > 0 && rect.height > 0;
-        })
-        .map(el => ({
-          tagName: el.tagName?.toLowerCase() || 'div',
-          id: el.id || '',
-          className: el.className || '',
-          textContent: el.textContent?.trim().substring(0, 50) || '',
-          placeholder: el.getAttribute?.('placeholder') || '',
-          name: el.getAttribute?.('name') || '',
-          type: el.getAttribute?.('type') || '',
-          role: el.getAttribute?.('role') || '',
-          ariaLabel: el.getAttribute?.('aria-label') || '',
-          title: el.getAttribute?.('title') || '',
-          value: (el as HTMLInputElement)?.value || '',
-          href: el.getAttribute?.('href') || '',
-          src: el.getAttribute?.('src') || '',
-          alt: el.getAttribute?.('alt') || '',
-          // Store the element for selector generation
-          _element: el
-        }));
-    });
+    const elements = await page.evaluate<SerializedElement[]>(collectElementsScript(this.config.maxElementsToAnalyze));
 
     this.domCache.set(page, { elements, timestamp: now });
     return elements;
   }
 
   /**
-   * Calculate comprehensive similarity using multiple algorithms
+   * Score how well an element matches what the selector identified it by.
+   * Each value in the selector (`#id`, `.class`, `[attr="v"]`, text, a bare word) is compared with
+   * the element's value of the same attribute: characters (levenshteinWeight) and words (semanticWeight).
+   * structuralWeight rewards the same tag or role, and only counts when the selector names a tag.
    */
   private async calculateComprehensiveSimilarity(
     originalSelector: string,
     element: SerializedElement
   ): Promise<number> {
-    const elementText = await this.getElementIdentifier(element);
-    const cacheKey = `${originalSelector}-${elementText}`;
-
-    if (this.similarityCache.has(cacheKey)) {
-      return this.similarityCache.get(cacheKey)!;
+    const cacheKey = `${originalSelector}\u0000${JSON.stringify(element)}`;
+    const cached = this.similarityCache.get(cacheKey);
+    if (cached !== undefined) {
+      return cached;
     }
 
-    const levenshteinScore = this.calculateLevenshteinSimilarity(originalSelector, elementText);
-    const semanticScore = await this.calculateSemanticSimilarity(originalSelector, element);
-    const structuralScore = await this.calculateStructuralSimilarity(originalSelector, element);
-
-    // Add element type bonus - prefer actual interactive elements over containers
-    let typeBonus = 0;
-    if (originalSelector.includes('input') && (element.tagName === 'input' || element.tagName === 'textarea')) typeBonus = 0.4;
-    else if (originalSelector.includes('button') && (element.tagName === 'button' || element.tagName === 'input')) typeBonus = 0.4;
-    else if (originalSelector.includes('select') && element.tagName === 'select') typeBonus = 0.4;
-    else if (originalSelector.includes('textarea') && element.tagName === 'textarea') typeBonus = 0.4;
-    // Penalize container elements when looking for interactive elements
-    else if ((originalSelector.includes('input') || originalSelector.includes('button')) &&
-             ['html', 'body', 'div', 'span', 'a'].includes(element.tagName)) typeBonus = -0.3;
-
-    // Add attribute matching bonus
-    let attributeBonus = 0;
-    if (originalSelector.includes('name=') && element.name) {
-      const nameMatch = originalSelector.match(/name=["']([^"']+)["']/);
-      if (nameMatch) {
-        const selectorName = nameMatch[1];
-        if (selectorName === element.name) {
-          attributeBonus += 0.5; // Strong bonus for exact name match
-        } else {
-          // Partial similarity bonus for similar names
-          const nameSimilarity = this.calculateLevenshteinSimilarity(selectorName, element.name);
-          if (nameSimilarity > 0.5) {
-            attributeBonus += nameSimilarity * 0.3; // Scaled bonus for similar names
-          }
-        }
-      }
+    const clampedScore = scoreElement(originalSelector, element, this.config);
+    if (this.config.debug && clampedScore > 0.3) {
+      this.secureLog(`Score ${clampedScore.toFixed(3)} for ${element.selectors?.[0] ?? element.tagName}`);
     }
 
-    // Special bonus for common search field patterns
-    if (originalSelector.includes('input') &&
-        (element.name === 'q' || element.name === 'search' || element.name === 'query')) {
-      attributeBonus += 0.3; // Bonus for common search field names
-    }
-
-    // Special bonus for Google search buttons
-    if (originalSelector.includes('button') &&
-        (element.name === 'btnK' || element.name === 'btnG' || element.type === 'submit')) {
-      attributeBonus += 0.4; // Strong bonus for Google search buttons
-    }
-
-    // Special bonus for common Google links
-    if (originalSelector.includes('Gmail') && element.textContent?.toLowerCase().includes('gmail')) {
-      attributeBonus += 0.4; // Bonus for Gmail links
-    }
-    if (originalSelector.includes('Images') && element.textContent?.toLowerCase().includes('images')) {
-      attributeBonus += 0.4; // Bonus for Images links
-    }
-
-    if (originalSelector.includes('placeholder=') && element.placeholder) {
-      const placeholderMatch = originalSelector.match(/placeholder=["']([^"']+)["']/);
-      if (placeholderMatch && placeholderMatch[1] === element.placeholder) {
-        attributeBonus += 0.3;
-      }
-    }
-    if (originalSelector.includes('type=') && element.type) {
-      const typeMatch = originalSelector.match(/type=["']([^"']+)["']/);
-      if (typeMatch && typeMatch[1] === element.type) {
-        attributeBonus += 0.3;
-      }
-    }
-
-    const totalScore =
-      (levenshteinScore * this.config.levenshteinWeight) +
-      (semanticScore * this.config.semanticWeight) +
-      (structuralScore * this.config.structuralWeight) +
-      typeBonus +
-      attributeBonus;
-
-    // Debug specific elements
-    if (this.config.debug && (elementText.includes('q') || elementText.includes('search') || totalScore > 0.01)) {
-      this.secureLog(`Detailed scoring for "${elementText}": L=${levenshteinScore.toFixed(3)}, S=${semanticScore.toFixed(3)}, St=${structuralScore.toFixed(3)}, TypeBonus=${typeBonus.toFixed(3)}, AttrBonus=${attributeBonus.toFixed(3)}, Total=${totalScore.toFixed(3)}`);
-    }
-
-    this.similarityCache.set(cacheKey, totalScore);
-    return Math.max(0, Math.min(totalScore, 1)); // Ensure score is between 0 and 1
-  }
-
-  /**
-   * Calculate Levenshtein distance-based similarity
-   */
-  private calculateLevenshteinSimilarity(str1: string, str2: string): number {
-    const matrix: number[][] = [];
-    const len1 = str1.length;
-    const len2 = str2.length;
-
-    if (len1 === 0) return len2 === 0 ? 1 : 0;
-    if (len2 === 0) return 0;
-
-    for (let i = 0; i <= len1; i++) {
-      matrix[i] = [i];
-    }
-
-    for (let j = 0; j <= len2; j++) {
-      matrix[0][j] = j;
-    }
-
-    for (let i = 1; i <= len1; i++) {
-      for (let j = 1; j <= len2; j++) {
-        const cost = str1[i - 1] === str2[j - 1] ? 0 : 1;
-        matrix[i][j] = Math.min(
-          matrix[i - 1][j] + 1,
-          matrix[i][j - 1] + 1,
-          matrix[i - 1][j - 1] + cost
-        );
-      }
-    }
-
-    const maxLen = Math.max(len1, len2);
-    const distance = matrix[len1][len2];
-    let similarity = 1 - (distance / maxLen);
-
-    // Enhanced substring matching
-    if (str2.startsWith(str1)) {
-      similarity += 0.8;
-    } else if (str2.includes(str1)) {
-      similarity += 0.6;
-    }
-
-    return Math.min(similarity, 1);
-  }
-
-  /**
-   * Calculate semantic similarity based on element properties
-   */
-  private async calculateSemanticSimilarity(
-    originalSelector: string,
-    element: SerializedElement
-  ): Promise<number> {
-    const elementText = await this.getElementIdentifier(element);
-    const originalWords = originalSelector.toLowerCase().split(/[-_\s]+/);
-    const elementWords = elementText.toLowerCase().split(/[-_\s]+/);
-
-    let matchCount = 0;
-    for (const word of originalWords) {
-      if (elementWords.some(ew => ew.includes(word) || word.includes(ew))) {
-        matchCount++;
-      }
-    }
-
-    return originalWords.length > 0 ? matchCount / originalWords.length : 0;
-  }
-
-  /**
-   * Calculate structural similarity based on DOM properties
-   */
-  private async calculateStructuralSimilarity(
-    originalSelector: string,
-    element: SerializedElement
-  ): Promise<number> {
-    try {
-      const tagName = element.tagName?.toLowerCase() || '';
-      const className = element.className || '';
-      const elementId = element.id || '';
-
-      let score = 0;
-
-      if (tagName && originalSelector.includes(tagName)) score += 0.3;
-      if (originalSelector.includes(elementId) && elementId) score += 0.4;
-      if (className && originalSelector.includes(className)) score += 0.3;
-
-      return Math.min(score, 1);
-    } catch (error) {
-      if (this.config.debug) {
-        console.warn('Error calculating structural similarity:', error);
-      }
-      return 0;
-    }
-  }
-
-  /**
-   * Calculate pattern similarity for advanced matching
-   */
-  private async calculatePatternSimilarity(
-    originalSelector: string,
-    element: SerializedElement,
-    contextualElements: SerializedElement[]
-  ): Promise<number> {
-    const elementText = await this.getElementIdentifier(element);
-    const basicSimilarity = this.calculateLevenshteinSimilarity(originalSelector, elementText);
-
-    // Pattern bonus for similar elements in context
-    const patternBonus = contextualElements.length > 0 ? 0.2 : 0;
-
-    return Math.min(basicSimilarity + patternBonus, 1);
-  }
-
-  /**
-   * Calculate contextual relevance
-   */
-  private async calculateContextualRelevance(
-    element: SerializedElement,
-    contextualElements: SerializedElement[]
-  ): Promise<number> {
-    if (contextualElements.length === 0) return 0.5;
-
-    // Since we can't access getBoundingClientRect() for SerializedElement,
-    // we'll use a simpler heuristic based on element similarity
-    let relevanceScore = 0;
-
-    for (const contextElement of contextualElements) {
-      // Check for similar tag names
-      if (element.tagName === contextElement.tagName) {
-        relevanceScore += 0.2;
-      }
-
-      // Check for shared attributes
-      if (element.className && contextElement.className &&
-          element.className === contextElement.className) {
-        relevanceScore += 0.1;
-      }
-    }
-
-    return Math.min(relevanceScore, 1);
-  }
-
-  /**
-   * Get contextual elements around the original selector
-   */
-  private async getContextualElements<TLocator extends PlaywrightLocator>(
-    page: PlaywrightPage<TLocator>,
-    originalSelector: string
-  ): Promise<SerializedElement[]> {
-    try {
-      return await page.evaluate((selector: string) => {
-        const elements = document.querySelectorAll('*');
-        return Array.from(elements)
-          .filter(el => {
-            const text = el.textContent || el.getAttribute('placeholder') || el.id || el.className;
-            return text && text.toLowerCase().includes(selector.toLowerCase().substring(0, 3));
-          })
-          .slice(0, 5)
-          .map(el => ({
-            tagName: el.tagName?.toLowerCase() || 'div',
-            id: el.id || '',
-            className: el.className || '',
-            textContent: el.textContent?.trim().substring(0, 50) || '',
-            placeholder: el.getAttribute?.('placeholder') || '',
-            name: el.getAttribute?.('name') || '',
-            type: el.getAttribute?.('type') || '',
-            role: el.getAttribute?.('role') || '',
-            ariaLabel: el.getAttribute?.('aria-label') || '',
-            title: el.getAttribute?.('title') || '',
-            value: (el as HTMLInputElement)?.value || '',
-            href: el.getAttribute?.('href') || '',
-            src: el.getAttribute?.('src') || '',
-            alt: el.getAttribute?.('alt') || ''
-          }));
-      }, originalSelector);
-    } catch {
-      return [];
-    }
+    this.similarityCache.set(cacheKey, clampedScore);
+    return clampedScore;
   }
 
   /**
@@ -812,10 +547,7 @@ export class PlaywrightAISelfHealing {
   /**
    * Generate optimal selector for found element
    */
-  private async generateOptimalSelector<TLocator extends PlaywrightLocator>(
-    _page: PlaywrightPage<TLocator>,
-    element: SerializedElement
-  ): Promise<string> {
+  private generateOptimalSelector(element: SerializedElement): string {
     try {
       // Generate selector based on SerializedElement properties
       if (element.id) return `#${element.id}`;
@@ -878,6 +610,74 @@ export class PlaywrightAISelfHealing {
   clearCache(): void {
     this.similarityCache.clear();
     // Note: WeakMap cannot be cleared, but it will be garbage collected
+  }
+}
+
+/**
+ * The parts of a Playwright Page that auto-healing needs
+ */
+export interface AutoHealPage {
+  locator(selector: string): object;
+  mainFrame(): object;
+  frameLocator(selector: string): object;
+}
+
+/** Pages with auto-healing on, and the engine name each uses */
+const autoHealEngines = new WeakMap<object, string>();
+const AUTO_HEAL_PATCHED = Symbol.for('playwright-ai-self-healing.auto-heal');
+
+/**
+ * Prefix a selector the test wrote with the healing engine, or leave it for Playwright.
+ * getByTestId compiles to `internal:testid=[attr="value"s]`, which becomes the same CSS attribute match.
+ */
+export function toHealingSelector(selector: string, engine = 'heal'): string {
+  const trimmed = selector.trim();
+  const testId = trimmed.match(/^internal:testid=\[([\w-]+)=("(?:[^"\\]|\\.)*")s?\]$/);
+  if (testId) {
+    return `${engine}=[${testId[1]}=${testId[2]}]`;
+  }
+
+  const playwrightOnly =
+    /^[a-z][\w:-]*=/i.test(trimmed) || // explicit engine: css=, xpath=, text=, internal:role=, heal=
+    /^["']/.test(trimmed) || // legacy quoted text selector
+    trimmed.includes('>>') ||
+    /:(has-text|text|text-is|text-matches|visible|nth-match|light|right-of|left-of|above|below|near)\b/.test(trimmed);
+  return playwrightOnly ? selector : `${engine}=${trimmed}`;
+}
+
+/**
+ * Wrap `locator()` of Playwright's Frame, Locator and FrameLocator classes once per process.
+ * Page.locator, every getBy* method and chained locators all go through these three.
+ * The wrapper changes selectors only for pages registered in autoHealEngines.
+ */
+// ponytail: patches Playwright's client prototypes, the only seam that catches every locator.
+// Checked against Playwright 1.55; an upgrade that stops routing getBy* through locator() breaks it.
+function installAutoHealing(page: AutoHealPage): void {
+  const prototypes = [page.mainFrame(), page.locator('html'), page.frameLocator('html')]
+    .map(instance => Object.getPrototypeOf(instance) as Record<string | symbol, unknown>);
+
+  for (const prototype of prototypes) {
+    if (prototype[AUTO_HEAL_PATCHED]) {
+      continue;
+    }
+    const original = prototype.locator as (this: unknown, selector: unknown, options?: unknown) => unknown;
+    prototype.locator = function (this: unknown, selector: unknown, options?: unknown) {
+      const engine = typeof selector === 'string' ? autoHealEngines.get(ownerPage(this) ?? {}) : undefined;
+      return original.call(this, engine ? toHealingSelector(selector as string, engine) : selector, options);
+    };
+    prototype[AUTO_HEAL_PATCHED] = true;
+  }
+}
+
+/**
+ * The page a Frame or Locator (`page()`) or a FrameLocator (`owner().page()`) belongs to
+ */
+function ownerPage(target: unknown): object | undefined {
+  const candidate = target as { page?: () => object; owner?: () => { page(): object } };
+  try {
+    return candidate.page?.() ?? candidate.owner?.().page();
+  } catch {
+    return undefined;
   }
 }
 

@@ -14,6 +14,8 @@ module.exports = {
     '@typescript-eslint/no-explicit-any': 'warn',
     'prefer-const': 'error',
     'no-var': 'error',
+    // TypeScript checks undefined names itself; this rule misfires on type namespaces like NodeJS
+    'no-undef': 'off',
   },
   env: {
     node: true,

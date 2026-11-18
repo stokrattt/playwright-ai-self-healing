@@ -8,6 +8,7 @@
     "build": "tsc",
     "type-check": "tsc --noEmit -p tsconfig.type-tests.json",
     "test": "jest",
+    "test:e2e": "playwright test",
     "lint": "eslint src/**/*.ts",
     "prepare": "npm run build"
   },
@@ -49,7 +50,7 @@
     "node": ">=16.0.0"
   },
   "devDependencies": {
-    "@playwright/test": "^1.55.0",
+    "@playwright/test": "^1.65.1",
     "@types/jest": "^29.5.5",
     "@types/node": "^20.6.3",
     "@typescript-eslint/eslint-plugin": "^6.7.2",
